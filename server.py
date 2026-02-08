@@ -12,6 +12,14 @@ from urllib.parse import urlparse
 import httpx
 from fastmcp import FastMCP
 
+# Descriptive tool names for better AI agent understanding
+# Maps R API paths to human-readable MCP tool names
+ENDPOINT_TOOL_NAMES = {
+    "/NCA": "Noncompartmental_analysis_NCA",
+    "/ER": "Exposure_response_ER_analysis",
+    "/PK": "Pharmacokinetic_simulation_IV_1_or_2_CM",
+}
+
 # Configure structured logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -83,12 +91,22 @@ def mount_plumber_api(timeout: float = 30.0) -> None:
             # Create async HTTP client for R API
             r_client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
 
+            # Build mcp_names mapping from operationIds in spec
+            mcp_names = {}
+            for path, methods in spec.get("paths", {}).items():
+                for method, details in methods.items():
+                    op_id = details.get("operationId")
+                    if op_id and path in ENDPOINT_TOOL_NAMES:
+                        mcp_names[op_id] = ENDPOINT_TOOL_NAMES[path]
+                        log.debug(f"  Tool name mapping: {op_id} -> {ENDPOINT_TOOL_NAMES[path]}")
+
             # Generate MCP tools from OpenAPI spec
             log.debug("  Generating MCP tools from OpenAPI spec...")
             r_mcp = FastMCP.from_openapi(
                 openapi_spec=spec,
                 client=r_client,
                 name="R API",
+                mcp_names=mcp_names,
             )
             log.debug(f"  Type of r_mcp: {type(r_mcp)}")
             log.debug(f"  r_mcp value: {r_mcp}")
@@ -99,7 +117,7 @@ def mount_plumber_api(timeout: float = 30.0) -> None:
             mcp.mount(r_mcp, "r")
             log.info(f"✓ R API successfully mounted to MCP server")
             # Format endpoint names for display
-            tool_names = [f'r_{ep.strip("/")}' for ep in endpoints]
+            tool_names = [f'r_{ENDPOINT_TOOL_NAMES.get(ep, ep.strip("/"))}' for ep in endpoints]
             log.info(f"  Available tools: {', '.join(tool_names)}")
 
             return  # Success!
