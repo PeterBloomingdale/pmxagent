@@ -1,0 +1,21 @@
+PMxAgent
+Copyright (c) 2025 Peter Bloomingdale and contributors
+
+This product includes software licensed under the Apache License 2.0.
+See the LICENSE file for details.
+
+Third-party notices:
+
+R packages:
+- mrgsolve (GPL >= 2) — Copyright (c) Metrum Research Group
+- PKNCA (AGPL-3) — Copyright (c) Bill Denney and contributors
+- plumber (MIT) — Copyright (c) 2016 Trestle Technology, LLC
+- ggplot2 (MIT) — Copyright (c) ggplot2 authors
+- patchwork (MIT) — Copyright (c) 2017 Thomas Lin Pedersen
+- RColorBrewer (Apache-2.0) — Copyright (c) Erich Neuwirth; color schemes by Cynthia Brewer et al.
+
+Python packages:
+- fastmcp (Apache-2.0) — Copyright (c) Jeremiah Lowin / Prefect
+- httpx (BSD-3-Clause) — Copyright (c) 2019 Encode OSS Ltd
+- python-dotenv (BSD-3-Clause) — Copyright (c) 2014 Saurabh Kumar
+- uvloop (Apache-2.0 OR MIT) — Copyright (c) 2015-present MagicStack Inc.

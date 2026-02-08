@@ -1,0 +1,56 @@
+# .dockerignore - Exclude files from Docker build context
+
+# Version control
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+venv/
+.venv/
+
+# R artifacts
+.Rproj.user/
+.Rhistory
+.RData
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Documentation (not needed in container)
+*.md
+examples/
+
+# Test files (not needed in production)
+tests/
+pytest.ini
+requirements-dev.txt
+
+# CI/CD
+.github/
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+credentials.*
+
+# Logs and generated files
+*.log
+figures/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/

@@ -1,0 +1,5 @@
+# requirements.txt - for docker build
+fastmcp
+httpx
+python-dotenv
+uvloop

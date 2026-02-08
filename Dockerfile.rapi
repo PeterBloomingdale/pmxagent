@@ -1,0 +1,35 @@
+# ---------- Dockerfile.rapi (R Plumber API) ----------
+# Use latest stable version
+# Note: Pin to specific version tag after verifying in production
+FROM rstudio/plumber:latest
+
+# Image metadata
+LABEL maintainer="PMxAgent Team"
+LABEL description="R Plumber API for pharmacometric functions"
+LABEL version="1.0.0"
+
+# Install required R packages
+COPY r-packages.txt /tmp/r-packages.txt
+RUN R -e "install.packages(scan('/tmp/r-packages.txt', what='character'), repos='https://cloud.r-project.org/')" \
+    && rm /tmp/r-packages.txt
+
+# Create figures directory with proper permissions
+RUN mkdir -p /figures && chmod 777 /figures
+
+# Copy API scripts into the image
+COPY ./apis /home/rstudio/apis
+
+# Create non-root user for running the service
+RUN useradd -m -u 1001 -s /bin/bash pmxuser \
+    && chown -R pmxuser:pmxuser /home/rstudio/apis /figures
+
+# Switch to non-root user
+USER pmxuser
+
+# Note: Health check defined in docker-compose.yml
+
+# Expose port
+EXPOSE 8000
+
+# Set the default command to run your Plumber API
+CMD ["/home/rstudio/apis/rapi.R"]

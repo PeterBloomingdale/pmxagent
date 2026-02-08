@@ -1,0 +1,92 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker images
+        run: |
+          docker compose build
+
+      - name: Start services
+        run: |
+          docker compose up -d
+          echo "Waiting for services to be healthy..."
+          sleep 15
+
+      - name: Check service health
+        run: |
+          docker compose ps
+          docker compose logs rapi | tail -20
+          docker compose logs mcp | tail -20
+
+      - name: Verify R API is accessible
+        run: |
+          curl -f http://localhost:5762/openapi.json || exit 1
+          echo "✓ R API is responding"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install test dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run endpoint tests
+        run: |
+          pytest tests/test_endpoints.py -v --tb=short
+        env:
+          PYTHONUNBUFFERED: 1
+
+      - name: Run validation tests
+        run: |
+          pytest tests/test_validation.py -v --tb=short
+        env:
+          PYTHONUNBUFFERED: 1
+
+      - name: Run all tests with coverage
+        run: |
+          pytest tests/ -v --cov=. --cov-report=term-missing --cov-report=xml
+        continue-on-error: true
+        env:
+          PYTHONUNBUFFERED: 1
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          file: ./coverage.xml
+          flags: integration
+          name: codecov-pmxagent
+        continue-on-error: true
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "=== R API Logs ==="
+          docker compose logs rapi
+          echo "=== MCP Server Logs ==="
+          docker compose logs mcp
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose down -v

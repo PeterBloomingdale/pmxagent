@@ -1,0 +1,65 @@
+# .gitignore - PMxAgent
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+*.swp
+*~
+
+# Test coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Generated figures
+figures/*.png
+figures/*.pdf
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+credentials.*
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+tmp/
+
+# Claude Code
+.claude/
+
+# Internal development files
+dev/
+
+# Manuscript (entire directory)
+manuscript/
+
+# Explicit pycache in subdirs
+tests/__pycache__/

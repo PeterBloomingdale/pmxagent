@@ -1,0 +1,99 @@
+# docker-compose.yml
+
+# Define explicit network for service communication
+networks:
+  pmxnet:
+    driver: bridge
+
+services:
+  rapi:
+    build:
+      context: .
+      dockerfile: Dockerfile.rapi
+    container_name: pmxagent-rapi
+    platform: linux/amd64
+    ports:
+      - "5762:8000"
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Health check - just verify port is listening (OpenAPI fetch is too slow)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/__docs__/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    # Volume for figure output
+    volumes:
+      - ./figures:/figures
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Network
+    networks:
+      - pmxnet
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    container_name: pmxagent-mcp
+    platform: linux/amd64
+    ports:
+      - "8000:8000"
+
+    # Resource limits (lighter than rapi)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    # Environment variables
+    environment:
+      RAPI_OPENAPI_URL: http://rapi:8000/openapi.json
+      PYTHONUNBUFFERED: "1"
+      LOG_LEVEL: "INFO"
+
+    # Note: No health check for mcp - FastMCP only serves SSE endpoint
+    # Container health is monitored by Docker based on process status
+
+    # Service dependency
+    depends_on:
+      rapi:
+        condition: service_healthy
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Network
+    networks:
+      - pmxnet
