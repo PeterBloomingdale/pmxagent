@@ -10,17 +10,27 @@ from fastmcp.client.transports import SSETransport
 BASE_URL = "http://127.0.0.1:8000/messages"
 
 
-def extract_result(raw_msg: str) -> dict:
-    """Extract result from MCP response"""
-    outer = json.loads(raw_msg)
-    # Handle both direct dict response and nested text response
-    if isinstance(outer, dict):
-        if "text" in outer:
-            inner = json.loads(outer["text"])
-            return inner
-        else:
-            return outer
-    return outer
+def extract_result(call_result) -> dict:
+    """Extract result dict from MCP call_tool response.
+
+    Supports both:
+    - FastMCP >=2.8: CallToolResult with .content attribute
+    - FastMCP <2.8: plain list of content blocks
+    """
+    if isinstance(call_result, list):
+        # Old API: list of content blocks
+        text = call_result[0].model_dump_json()
+        outer = json.loads(text)
+        if isinstance(outer, dict) and "text" in outer:
+            return json.loads(outer["text"])
+        return outer
+    else:
+        # New API: CallToolResult object
+        text = call_result.content[0].text
+        outer = json.loads(text)
+        if isinstance(outer, dict) and "text" in outer:
+            return json.loads(outer["text"])
+        return outer
 
 
 @pytest.mark.asyncio
@@ -32,16 +42,16 @@ async def test_nca_endpoint():
         assert "r_Noncompartmental_analysis_NCA" in names, f"NCA tool not found. Available tools: {names}"
 
         # Call NCA endpoint with test data
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,0.25,0.5,1,2,4,8,12,24",
                 "conc": "10,9.05,8.19,6.70,4.49,3.01,1.83,1.11,0.45",
                 "dose": "100"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify new response structure with units
         assert "mode" in result, "mode not in result"
@@ -95,7 +105,7 @@ async def test_er_endpoint():
 
         # Call ER endpoint with test data (Emax-like response)
         # dose must match length of exposure/resp
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Exposure_response_ER_analysis",
             {
                 "exposure": "0.1,0.5,1,2,5,10,20,50,100",
@@ -103,9 +113,9 @@ async def test_er_endpoint():
                 "dose": "10 mg,10 mg,10 mg,30 mg,30 mg,30 mg,100 mg,100 mg,100 mg",
                 "model": "auto"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify expected outputs
         assert "model_used" in result, "model_used not in result"
@@ -127,7 +137,7 @@ async def test_er_endpoint_with_exposure_and_dose():
     """Test ER endpoint with new exposure parameter and dose groups"""
     async with Client(SSETransport(BASE_URL)) as c:
         # Call ER endpoint with exposure parameter and dose groups
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Exposure_response_ER_analysis",
             {
                 "exposure": "25,30,35,50,60,70,100,120,140,160,180,200",
@@ -136,9 +146,9 @@ async def test_er_endpoint_with_exposure_and_dose():
                 "model": "auto",
                 "n_quantiles": "4"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify basic outputs
         assert "model_used" in result, "model_used not in result"
@@ -189,7 +199,7 @@ async def test_pk_endpoint_1cm():
         assert "r_Pharmacokinetic_simulation_IV_1_or_2_CM" in names, f"PK tool not found. Available tools: {names}"
 
         # Call PK endpoint with 1-compartment parameters (uses population mode by default)
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Pharmacokinetic_simulation_IV_1_or_2_CM",
             {
                 "dose": "100",
@@ -200,9 +210,9 @@ async def test_pk_endpoint_1cm():
                 "model": "1cm",
                 "seed": "42"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify population mode outputs
         assert result.get("mode") == "population", f"Expected population mode, got {result.get('mode')}"
@@ -230,7 +240,7 @@ async def test_pk_endpoint_2cm():
     """Test PK simulation endpoint - two compartment model (population mode)"""
     async with Client(SSETransport(BASE_URL)) as c:
         # Call PK endpoint with 2-compartment parameters
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Pharmacokinetic_simulation_IV_1_or_2_CM",
             {
                 "dose": "100",
@@ -243,9 +253,9 @@ async def test_pk_endpoint_2cm():
                 "model": "2cm",
                 "seed": "42"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify population mode outputs
         assert result.get("mode") == "population", f"Expected population mode, got {result.get('mode')}"
@@ -265,7 +275,7 @@ async def test_pk_endpoint_auto_selection():
     """Test PK endpoint auto-selects correct model based on parameters"""
     async with Client(SSETransport(BASE_URL)) as c:
         # Explicitly request 1CM model
-        raw_1cm = (await c.call_tool(
+        call_result_1cm = await c.call_tool(
             "r_Pharmacokinetic_simulation_IV_1_or_2_CM",
             {
                 "dose": "100",
@@ -274,14 +284,14 @@ async def test_pk_endpoint_auto_selection():
                 "t": "0,1,2,4,8",
                 "model": "1cm"
             }
-        ))[0].model_dump_json()
+        )
 
-        result_1cm = extract_result(raw_1cm)
+        result_1cm = extract_result(call_result_1cm)
         assert result_1cm["model_used"] == "one-compartment", \
             "Should use 1CM when explicitly requested"
 
         # Explicitly request 2CM model
-        raw_2cm = (await c.call_tool(
+        call_result_2cm = await c.call_tool(
             "r_Pharmacokinetic_simulation_IV_1_or_2_CM",
             {
                 "dose": "100",
@@ -292,9 +302,9 @@ async def test_pk_endpoint_auto_selection():
                 "t": "0,1,2,4,8",
                 "model": "2cm"
             }
-        ))[0].model_dump_json()
+        )
 
-        result_2cm = extract_result(raw_2cm)
+        result_2cm = extract_result(call_result_2cm)
         assert result_2cm["model_used"] == "two-compartment", \
             "Should use 2CM when explicitly requested"
 
@@ -323,7 +333,7 @@ async def test_pk_population_mode():
     async with Client(SSETransport(BASE_URL)) as c:
         # Call PK endpoint with population mode parameters
         # n_subjects must equal n_per_dose * number of doses
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Pharmacokinetic_simulation_IV_1_or_2_CM",
             {
                 "n_subjects": "30",
@@ -334,9 +344,9 @@ async def test_pk_population_mode():
                 "t": "0,1,2,4,8,12,24,48,168,336",
                 "seed": "42"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify population mode outputs
         assert result.get("mode") == "population", f"Expected population mode, got {result.get('mode')}"
@@ -386,7 +396,7 @@ async def test_pk_endpoint_multi_subject():
     async with Client(SSETransport(BASE_URL)) as c:
         # Call PK endpoint with 6 subjects (2 per dose group)
         # n_subjects must equal n_per_dose * number of doses
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Pharmacokinetic_simulation_IV_1_or_2_CM",
             {
                 "dose": "10,30,100",
@@ -396,9 +406,9 @@ async def test_pk_endpoint_multi_subject():
                 "model": "2cm",
                 "seed": "42"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify population mode outputs
         assert result.get("mode") == "population", f"Expected population mode, got {result.get('mode')}"
@@ -432,7 +442,7 @@ async def test_nca_endpoint_multi_subject():
     """Test NCA endpoint with multi-subject (pipe-separated) mode and unit handling"""
     async with Client(SSETransport(BASE_URL)) as c:
         # Call NCA endpoint with 3 subjects using pipe-separated format
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24|0,1,2,4,8,12,24|0,1,2,4,8,12,24",
@@ -441,9 +451,9 @@ async def test_nca_endpoint_multi_subject():
                 "subject_id": "SUBJ001|SUBJ002|SUBJ003",
                 "dose_label": "10 mg|30 mg|100 mg"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify population mode outputs
         assert result.get("mode") == "population", f"Expected population mode, got {result.get('mode')}"
@@ -501,7 +511,7 @@ async def test_er_endpoint_binary_response():
     """Test ER endpoint with binary (0/1) response data"""
     async with Client(SSETransport(BASE_URL)) as c:
         # Binary response data: ~10% at low exposure, ~50% at medium, ~90% at high
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Exposure_response_ER_analysis",
             {
                 "exposure": "50,55,60,65,70,75,150,160,170,180,190,200,500,520,540,560,580,600",
@@ -510,9 +520,9 @@ async def test_er_endpoint_binary_response():
                 "model": "auto",
                 "n_quantiles": "3"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # For binary data, auto mode should select logit model
         assert result["model_used"] == "logit", \
@@ -544,15 +554,15 @@ async def test_pk_with_defaults():
     async with Client(SSETransport(BASE_URL)) as c:
         # Call PK endpoint with minimal parameters - uses defaults
         # Default: n_subjects=60, n_per_dose=20, dose=10,30,100
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Pharmacokinetic_simulation_IV_1_or_2_CM",
             {
                 "t": "0,0.25,0.5,1,2,4,8,12,24",
                 "seed": "42"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify population mode (default behavior)
         assert result.get("mode") == "population", f"Expected population mode, got {result.get('mode')}"
@@ -573,16 +583,16 @@ async def test_nca_backwards_compatibility():
     """Test that single-subject NCA still works (backwards compatible parameters)"""
     async with Client(SSETransport(BASE_URL)) as c:
         # Call NCA endpoint with single subject (original parameters, new response format)
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,0.25,0.5,1,2,4,8,12,24",
                 "conc": "10,9.05,8.19,6.70,4.49,3.01,1.83,1.11,0.45",
                 "dose": "100"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify single mode
         assert result.get("mode") == "single", f"Expected single mode, got {result.get('mode')}"
@@ -611,7 +621,7 @@ async def test_nca_backwards_compatibility():
 async def test_nca_with_explicit_units():
     """Test NCA endpoint with explicit unit parameters"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24",
@@ -621,9 +631,9 @@ async def test_nca_with_explicit_units():
                 "conc_unit": "ng/mL",
                 "time_unit": "h"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify units are reflected in response
         assert result["input_units"]["time"] == "h", "time unit should be h"
@@ -641,7 +651,7 @@ async def test_nca_with_explicit_units():
 async def test_nca_with_mg_kg_dosing():
     """Test NCA endpoint with mg/kg dosing and body weight"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24",
@@ -652,9 +662,9 @@ async def test_nca_with_mg_kg_dosing():
                 "conc_unit": "ug/mL",
                 "time_unit": "h"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify dose handling
         assert result["dose_administered"]["value"] == 1.5, "dose value should be 1.5"
@@ -674,7 +684,7 @@ async def test_nca_with_mg_kg_dosing():
 async def test_nca_with_minutes_time_unit():
     """Test NCA endpoint with minutes as time unit"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,15,30,60,120,240,480",
@@ -682,9 +692,9 @@ async def test_nca_with_minutes_time_unit():
                 "dose": "50",
                 "time_unit": "min"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify time unit is reflected
         assert result["input_units"]["time"] == "min", "time unit should be min"
@@ -699,7 +709,7 @@ async def test_nca_with_minutes_time_unit():
 async def test_nca_iv_bolus_route():
     """Test NCA endpoint with IV bolus route"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,0.25,0.5,1,2,4,8,12,24",
@@ -707,9 +717,9 @@ async def test_nca_iv_bolus_route():
                 "dose": "100",
                 "route": "iv_bolus"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify analysis settings include route
         assert "analysis_settings" in result, "analysis_settings not in result"
@@ -725,7 +735,7 @@ async def test_nca_iv_bolus_route():
 async def test_nca_iv_infusion_route():
     """Test NCA endpoint with IV infusion route"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,0.5,1,2,4,8,12,24",
@@ -734,9 +744,9 @@ async def test_nca_iv_infusion_route():
                 "route": "iv_infusion",
                 "infusion_duration": "1"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify analysis settings
         assert result["analysis_settings"]["route"] == "iv_infusion", \
@@ -750,7 +760,7 @@ async def test_nca_iv_infusion_route():
 async def test_nca_extravascular_route():
     """Test NCA endpoint with extravascular route (default)"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24",
@@ -758,9 +768,9 @@ async def test_nca_extravascular_route():
                 "dose": "50",
                 "route": "extravascular"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify analysis settings
         assert result["analysis_settings"]["route"] == "extravascular", \
@@ -775,7 +785,7 @@ async def test_nca_extravascular_route():
 async def test_nca_repeat_dosing():
     """Test NCA endpoint with repeat dosing scenario"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24,25,26,28,32,36,48",
@@ -785,9 +795,9 @@ async def test_nca_repeat_dosing():
                 "dosing_scenario": "repeat",
                 "tau": "24"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify analysis settings
         assert result["analysis_settings"]["dosing_scenario"] == "repeat", \
@@ -801,7 +811,7 @@ async def test_nca_repeat_dosing():
 async def test_nca_custom_auc_method():
     """Test NCA endpoint with custom AUC method"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24",
@@ -809,9 +819,9 @@ async def test_nca_custom_auc_method():
                 "dose": "100",
                 "auc_method": "linear"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify analysis settings
         assert result["analysis_settings"]["auc_method"] == "linear", \
@@ -825,7 +835,7 @@ async def test_nca_custom_auc_method():
 async def test_nca_custom_half_life_criteria():
     """Test NCA endpoint with custom half-life criteria"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24",
@@ -834,9 +844,9 @@ async def test_nca_custom_half_life_criteria():
                 "min_hl_points": "4",
                 "min_hl_r_squared": "0.95"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify analysis settings
         assert result["analysis_settings"]["min_hl_points"] == 4, \
@@ -849,7 +859,7 @@ async def test_nca_custom_half_life_criteria():
 async def test_nca_custom_extrapolation_limit():
     """Test NCA endpoint with custom extrapolation limit"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24",
@@ -857,9 +867,9 @@ async def test_nca_custom_extrapolation_limit():
                 "dose": "100",
                 "max_aucinf_pext": "15"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify analysis settings
         assert result["analysis_settings"]["max_aucinf_pext"] == 15, \
@@ -870,7 +880,7 @@ async def test_nca_custom_extrapolation_limit():
 async def test_nca_blq_handling():
     """Test NCA endpoint with BLQ handling options"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24",
@@ -880,9 +890,9 @@ async def test_nca_blq_handling():
                 "blq_middle": "zero",
                 "blq_last": "keep"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify analysis settings include BLQ handling
         assert "blq_handling" in result["analysis_settings"], \
@@ -897,7 +907,7 @@ async def test_nca_blq_handling():
 async def test_nca_results_structure():
     """Test NCA endpoint returns enhanced results structure"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,0.25,0.5,1,2,4,8,12,24",
@@ -905,9 +915,9 @@ async def test_nca_results_structure():
                 "dose": "100",
                 "route": "iv_bolus"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify new results structure
         assert "results" in result, "results not in result"
@@ -933,7 +943,7 @@ async def test_nca_results_structure():
 async def test_nca_all_business_rules():
     """Test NCA endpoint with all business rules specified"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24",
@@ -950,9 +960,9 @@ async def test_nca_all_business_rules():
                 "blq_middle": "drop",
                 "blq_last": "keep"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify all analysis settings
         settings = result["analysis_settings"]
@@ -972,7 +982,7 @@ async def test_nca_all_business_rules():
 async def test_nca_population_with_routes():
     """Test NCA endpoint with population mode and route specification"""
     async with Client(SSETransport(BASE_URL)) as c:
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "0,1,2,4,8,12,24|0,1,2,4,8,12,24",
@@ -982,9 +992,9 @@ async def test_nca_population_with_routes():
                 "dose_label": "10 mg|30 mg",
                 "route": "iv_bolus"
             }
-        ))[0].model_dump_json()
+        )
 
-        result = extract_result(raw)
+        result = extract_result(call_result)
 
         # Verify population mode
         assert result["mode"] == "population", "mode should be population"
