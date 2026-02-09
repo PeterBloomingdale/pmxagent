@@ -9,16 +9,25 @@ from fastmcp.client.transports import SSETransport
 BASE_URL = "http://127.0.0.1:8000/messages"
 
 
-def extract_result(raw_msg: str) -> dict:
-    """Extract result from MCP response"""
-    outer = json.loads(raw_msg)
-    if isinstance(outer, dict):
-        if "text" in outer:
-            inner = json.loads(outer["text"])
-            return inner
-        else:
-            return outer
-    return outer
+def extract_result(call_result) -> dict:
+    """Extract result dict from MCP call_tool response.
+
+    Supports both:
+    - FastMCP >=2.8: CallToolResult with .content attribute
+    - FastMCP <2.8: plain list of content blocks
+    """
+    if isinstance(call_result, list):
+        text = call_result[0].model_dump_json()
+        outer = json.loads(text)
+        if isinstance(outer, dict) and "text" in outer:
+            return json.loads(outer["text"])
+        return outer
+    else:
+        text = call_result.content[0].text
+        outer = json.loads(text)
+        if isinstance(outer, dict) and "text" in outer:
+            return json.loads(outer["text"])
+        return outer
 
 
 def is_error_response(result: dict) -> bool:
@@ -31,15 +40,15 @@ async def test_nca_missing_data():
     """Test NCA endpoint uses defaults when empty strings provided"""
     async with Client(SSETransport(BASE_URL)) as c:
         # Empty strings use defaults (endpoint has default values)
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Noncompartmental_analysis_NCA",
             {
                 "time": "",
                 "conc": "",
                 "dose": "100"
             }
-        ))[0].model_dump_json()
-        result = extract_result(raw)
+        )
+        result = extract_result(call_result)
         # With defaults, should return valid NCA result (not an error)
         assert "Cmax" in result or "error" in result, "Should return result or error"
 
@@ -146,7 +155,7 @@ async def test_pk_negative_parameters():
     async with Client(SSETransport(BASE_URL)) as c:
         # Note: API currently doesn't validate negative CL - simulation runs but produces invalid results
         # This test documents the current behavior; proper validation would be a future enhancement
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Pharmacokinetic_simulation_IV_1_or_2_CM",
             {
                 "dose": "100",
@@ -156,8 +165,8 @@ async def test_pk_negative_parameters():
                 "t": "0,1,2,4",
                 "model": "1cm"
             }
-        ))[0].model_dump_json()
-        result = extract_result(raw)
+        )
+        result = extract_result(call_result)
         # Currently the API runs with negative CL (produces invalid results)
         # This documents current behavior - ideally would validate and return error
         assert "individual_data" in result or "error" in result, "Should return data or error"
@@ -186,7 +195,7 @@ async def test_pk_2cm_uses_defaults():
     """Test PK endpoint 2CM uses default V2/Q when not provided"""
     async with Client(SSETransport(BASE_URL)) as c:
         # Requesting 2CM without V2/Q should use defaults (not fail)
-        raw = (await c.call_tool(
+        call_result = await c.call_tool(
             "r_Pharmacokinetic_simulation_IV_1_or_2_CM",
             {
                 "dose": "100",
@@ -196,8 +205,8 @@ async def test_pk_2cm_uses_defaults():
                 "t": "0,1,2,4",
                 "model": "2cm"  # V2/Q will use defaults
             }
-        ))[0].model_dump_json()
-        result = extract_result(raw)
+        )
+        result = extract_result(call_result)
         # Should succeed with defaults
         assert not is_error_response(result), f"Expected success with default V2/Q, got {result}"
         assert result.get("model_used") == "two-compartment", "Should use two-compartment model"
