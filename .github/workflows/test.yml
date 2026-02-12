@@ -50,22 +50,9 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Run endpoint tests
+      - name: Run tests with coverage
         run: |
-          pytest tests/test_endpoints.py -v --tb=short
-        env:
-          PYTHONUNBUFFERED: 1
-
-      - name: Run validation tests
-        run: |
-          pytest tests/test_validation.py -v --tb=short
-        env:
-          PYTHONUNBUFFERED: 1
-
-      - name: Run all tests with coverage
-        run: |
-          pytest tests/ -v --cov=. --cov-report=term-missing --cov-report=xml
-        continue-on-error: true
+          pytest tests/ -v --cov=tests --cov-report=term-missing --cov-report=xml
         env:
           PYTHONUNBUFFERED: 1
 

@@ -6,7 +6,7 @@
 [![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 [![R](https://img.shields.io/badge/r-%23276DC3.svg?style=flat&logo=r&logoColor=white)](https://www.r-project.org/)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-62%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen)](tests/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 ---
@@ -292,12 +292,13 @@ Output figures save to `figures/` directory. All changes persist across containe
 
 ### Test Suite
 
-PMxAgent includes **62 total tests**: 40 Python integration tests (via pytest) and 22 R unit tests.
+PMxAgent includes **60 total tests**: 38 Python integration tests (via pytest) and 22 R unit tests.
 
 | Test File | Tests | Description |
 |-----------|-------|-------------|
-| `tests/test_endpoints.py` | 27 | MCP endpoint integration tests |
+| `tests/test_endpoints.py` | 25 | MCP endpoint integration tests (includes parametrized route and business rule tests) |
 | `tests/test_validation.py` | 13 | Input validation and error handling |
+| `tests/conftest.py` | — | Shared fixtures, helpers, and constants |
 | `apis/tests/test_nca.R` | 16 | NCA ground truth, route validation, dosing scenarios, BLQ handling, business rules, PKNCA options |
 | `apis/tests/test_pk_models.R` | 6 | mrgsolve vs analytical solutions |
 
@@ -314,23 +315,19 @@ docker compose up -d
 docker compose ps
 ```
 
-#### Python Integration Tests (40 tests)
+#### Python Integration Tests (38 tests)
 
 Test all three pharmacometric endpoints via PMxAgent's MCP interface:
 
 ```bash
 # Run all integration tests
-pytest tests/test_endpoints.py -v
+pytest tests/ -v
 
 # Run specific test
 pytest tests/test_endpoints.py::test_nca_endpoint -v
 
-# Run with coverage report
-pytest tests/ -v --cov=. --cov-report=html
-# Open htmlcov/index.html in browser to view coverage
-
-# Run validation/error handling tests
-pytest tests/test_validation.py -v
+# Run with coverage report (scoped to tests/ to exclude server.py which runs in Docker)
+pytest tests/ -v --cov=tests --cov-report=term-missing
 ```
 
 **What's tested:**
@@ -342,24 +339,20 @@ pytest tests/test_validation.py -v
 
 **Expected output:**
 ```
+tests/test_endpoints.py::test_list_all_tools PASSED
 tests/test_endpoints.py::test_nca_endpoint PASSED
+tests/test_endpoints.py::test_nca_routes[iv_bolus-...] PASSED
+tests/test_endpoints.py::test_nca_routes[iv_infusion-...] PASSED
+tests/test_endpoints.py::test_nca_routes[extravascular-...] PASSED
+tests/test_endpoints.py::test_nca_business_rules[...] PASSED
 tests/test_endpoints.py::test_er_endpoint PASSED
 tests/test_endpoints.py::test_pk_endpoint_1cm PASSED
-tests/test_endpoints.py::test_pk_endpoint_2cm PASSED
-tests/test_endpoints.py::test_pk_endpoint_auto_selection PASSED
-tests/test_endpoints.py::test_list_all_tools PASSED
-tests/test_endpoints.py::test_pk_population_mode PASSED
-tests/test_endpoints.py::test_pk_endpoint_multi_subject PASSED
-tests/test_endpoints.py::test_nca_endpoint_multi_subject PASSED
-tests/test_endpoints.py::test_er_endpoint_binary_response PASSED
 ...
 tests/test_validation.py::test_nca_mismatched_lengths PASSED
 tests/test_validation.py::test_nca_negative_dose PASSED
 tests/test_validation.py::test_pk_negative_time PASSED
-tests/test_validation.py::test_nca_non_numeric_data PASSED
-tests/test_validation.py::test_er_non_numeric_response PASSED
 
-======================== 40 passed in 13.15s ========================
+======================== 38 passed in 13.15s ========================
 ```
 
 #### R Unit Tests (22 tests)
@@ -403,6 +396,7 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_pk_models.R
 │       ├── test_nca.R      # NCA ground truth validation
 │       └── test_pk_models.R # PK model unit tests
 ├── tests/                   # Python integration tests
+│   ├── conftest.py         # Shared fixtures and helpers
 │   ├── test_endpoints.py   # MCP endpoint tests
 │   └── test_validation.py  # Input validation tests
 ├── server.py               # MCP server entry point
