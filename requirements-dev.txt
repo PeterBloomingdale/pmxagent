@@ -3,6 +3,7 @@
 # Testing framework
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
 
 # MCP client for integration tests
 fastmcp>=2.14.0,<3
