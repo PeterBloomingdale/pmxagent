@@ -194,6 +194,36 @@ fit_logit_model <- function(conc, resp) {
   })
 }
 
+#' Generate binary response vector from target rates per dose group
+#' @param dose_vec Vector of dose labels (e.g., c("10 mg", "10 mg", ..., "30 mg", ...))
+#' @param rates Vector of target response rates, one per unique dose group (e.g., c(0.1, 0.5, 0.9))
+#' @param seed Random seed for reproducibility
+#' @return Vector of binary (0/1) responses matching the order of dose_vec
+generate_binary_response <- function(dose_vec, rates, seed) {
+  unique_doses <- unique(dose_vec)
+
+  if (length(rates) != length(unique_doses)) {
+    stop(sprintf(
+      "resp_rate has %d values but dose has %d unique groups (%s). Must match.",
+      length(rates), length(unique_doses), paste(unique_doses, collapse = ", ")
+    ))
+  }
+
+  if (any(rates < 0 | rates > 1)) {
+    stop("resp_rate values must be between 0 and 1")
+  }
+
+  set.seed(seed)
+
+  resp <- numeric(length(dose_vec))
+  for (i in seq_along(unique_doses)) {
+    idx <- which(dose_vec == unique_doses[i])
+    resp[idx] <- rbinom(length(idx), size = 1, prob = rates[i])
+  }
+
+  return(resp)
+}
+
 #' Check if response data is binary (0/1)
 #' @param resp Response vector
 #' @return TRUE if binary, FALSE otherwise

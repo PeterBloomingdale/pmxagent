@@ -6,9 +6,12 @@
 #* Fits exposure-response models following Overgaard et al. (2015) good practices.
 #* Shows response vs exposure (AUC) with quantile-based data display and optional dose group bars.
 #* Supports binary (0/1) response data with logit model.
+#* When resp_rate is provided with dose, binary responses are generated from target rates using seed for reproducibility.
 #* @param exposure Comma-separated exposure values (AUC). Default: 60 subjects (20 per dose) from PK/NCA case study
 #* @param resp Comma-separated responses (continuous or binary 0/1). Default: binary responses following logistic E-R
 #* @param dose Comma-separated dose labels (optional). Default: 10 mg, 30 mg, 100 mg groups
+#* @param resp_rate Comma-separated target response rates per dose group (e.g. "0.1,0.5,0.9"). When provided with dose, generates binary responses from these rates using seed. Overrides resp.
+#* @param seed Random seed for reproducible binary response generation when resp_rate is used (string, optional, default "42")
 #* @param model Model type: "auto", "linear", "emax", "imax", or "logit" (default: "auto")
 #* @param n_quantiles Number of quantiles for visualization (default: "4")
 #* @param subject_id Comma-separated subject IDs for tracking (string, optional)
@@ -19,6 +22,8 @@
 function(exposure = "440.3,582.0,626.1,764.0,769.7,604.1,586.8,833.6,607.8,871.9,880.9,547.5,597.1,897.6,668.8,523.8,793.2,857.4,558.8,655.1,1958.0,1288.0,2372.8,1316.4,1827.4,1655.8,1812.3,2036.1,1580.6,2048.7,1853.4,2383.5,1572.4,2591.1,1650.4,1967.2,2489.9,1836.5,1584.8,2080.1,6887.1,7421.5,6718.6,7315.4,7557.5,5574.1,3952.1,7153.6,9919.6,5926.6,7098.7,6842.8,7253.8,8100.2,7915.5,7583.6,6312.1,8477.2,6723.4,7687.0",
          resp = "0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,1,1,0,1,0,1,0,0,0,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
          dose = "10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg",
+         resp_rate = NULL,
+         seed = "42",
          model = "auto",
          n_quantiles = "4",
          subject_id = NULL,
@@ -28,19 +33,13 @@ function(exposure = "440.3,582.0,626.1,764.0,769.7,604.1,586.8,833.6,607.8,871.9
   tryCatch({
     # Validate inputs are not empty
     validate_string_input(exposure, "exposure")
-    validate_string_input(resp, "resp")
 
-    # Parse inputs
+    # Parse exposure
     es <- as.numeric(strsplit(exposure, ",")[[1]])
-    rs <- as.numeric(strsplit(resp, ",")[[1]])
     n_quant <- as.integer(n_quantiles)
 
-    # Validate
+    # Validate exposure
     validate_numeric_vector(es, "exposure")
-    validate_numeric_vector(rs, "resp")
-    if (length(es) != length(rs)) {
-      stop(sprintf("Length mismatch: exposure (%d) and resp (%d) must be equal", length(es), length(rs)))
-    }
     if (n_quant < 2 || n_quant > 10) {
       stop("n_quantiles must be between 2 and 10")
     }
@@ -52,6 +51,30 @@ function(exposure = "440.3,582.0,626.1,764.0,769.7,604.1,586.8,833.6,607.8,871.9
       if (length(dose_vec) != length(es)) {
         stop(sprintf("Length mismatch: dose (%d) must match exposure (%d)", length(dose_vec), length(es)))
       }
+    }
+
+    # Generate or parse response
+    use_resp_rate <- !is.null(resp_rate) && nchar(trimws(resp_rate)) > 0
+    if (use_resp_rate) {
+      # Generate binary responses from target rates
+      if (is.null(dose_vec)) {
+        stop("dose is required when using resp_rate (need dose groups to determine group sizes)")
+      }
+      rates <- as.numeric(strsplit(resp_rate, ",")[[1]])
+      if (any(is.na(rates))) {
+        stop("resp_rate contains non-numeric values")
+      }
+      seed_val <- as.integer(seed)
+      rs <- generate_binary_response(dose_vec, rates, seed_val)
+    } else {
+      validate_string_input(resp, "resp")
+      rs <- as.numeric(strsplit(resp, ",")[[1]])
+    }
+
+    # Validate response
+    validate_numeric_vector(rs, "resp")
+    if (length(es) != length(rs)) {
+      stop(sprintf("Length mismatch: exposure (%d) and resp (%d) must be equal", length(es), length(rs)))
     }
 
     # Create data frame (use 'conc' internally to maintain model compatibility)
@@ -200,6 +223,15 @@ function(exposure = "440.3,582.0,626.1,764.0,769.7,604.1,586.8,833.6,607.8,871.9
     # Add dose summary if dose was provided
     if (!is.null(dose_summary)) {
       result$dose_summary <- dose_summary
+    }
+
+    # Add resp_rate generation info if used
+    if (use_resp_rate) {
+      result$resp_rate_generation <- list(
+        resp_rate = rates,
+        seed = seed_val,
+        generated_resp = as.integer(rs)
+      )
     }
 
     return(result)

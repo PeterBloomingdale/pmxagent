@@ -274,12 +274,15 @@ curl -X POST http://localhost:5762/NCA \
 ### POST /ER (Exposure-Response)
 - **Required params**: `exposure`, `resp` (comma-separated numeric strings, have defaults for Swagger UI)
 - **Optional params**: `model` ("auto", "linear", "emax", "imax", "logit")
+- **Response generation params** (alternative to providing `resp` directly):
+  - `resp_rate` - Comma-separated target response rates per dose group (e.g., `"0.1,0.5,0.9"`). When provided with `dose`, generates binary (0/1) responses from these rates using `rbinom()`. Overrides `resp`.
+  - `seed` - Random seed for reproducible response generation (default: `"42"`). Only used when `resp_rate` is provided.
 - **Plot customization params**:
   - `auc_unit` - AUC unit label for x-axis (default: "h*ug/mL") — **display label only**, no validation or numeric conversion
   - `figure_dir` - Output directory for figures (default: "/figures")
 - **Unit handling**: No unit validation or conversion. `auc_unit` is used solely as a plot axis label. Response values are treated as unitless.
 - **Model selection**: Auto mode selects best model by AIC
-- **Returns**: Best model parameters, fit statistics (AIC, R²), plot path, all fitted models
+- **Returns**: Best model parameters, fit statistics (AIC, R²), plot path, all fitted models. When `resp_rate` is used, also returns `resp_rate_generation` with the rates, seed, and generated binary responses.
 - **Plot output**: `/figures/ER_YYYYMMDD_HHMMSS.png`
 
 ### POST /PK (Pharmacokinetic Simulation)

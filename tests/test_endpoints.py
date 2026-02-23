@@ -352,6 +352,51 @@ async def test_er_endpoint_binary_response(mcp_client):
     assert len(result["dose_summary"]) == 3
 
 
+@pytest.mark.asyncio
+async def test_er_endpoint_resp_rate(mcp_client):
+    """Test ER endpoint with resp_rate generating binary responses from rates + seed"""
+    result = await call_tool_ok(mcp_client, ER_TOOL, {
+        "exposure": "50,55,60,65,70,75,150,160,170,180,190,200,500,520,540,560,580,600",
+        "dose": "10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg",
+        "resp_rate": "0.1,0.5,0.9",
+        "seed": "42",
+        "model": "auto",
+        "n_quantiles": "3"
+    })
+
+    assert result["model_used"] == "logit"
+    assert "plot_path" in result
+    assert len(result["dose_summary"]) == 3
+
+    # Verify resp_rate generation metadata
+    assert "resp_rate_generation" in result
+    gen = result["resp_rate_generation"]
+    assert gen["resp_rate"] == [0.1, 0.5, 0.9]
+    assert gen["seed"] == 42
+    assert len(gen["generated_resp"]) == 18
+    assert all(r in [0, 1] for r in gen["generated_resp"])
+
+
+@pytest.mark.asyncio
+async def test_er_endpoint_resp_rate_reproducibility(mcp_client):
+    """Test that resp_rate + seed produces identical results across calls"""
+    args = {
+        "exposure": "50,55,60,65,70,75,150,160,170,180,190,200,500,520,540,560,580,600",
+        "dose": "10 mg,10 mg,10 mg,10 mg,10 mg,10 mg,30 mg,30 mg,30 mg,30 mg,30 mg,30 mg,100 mg,100 mg,100 mg,100 mg,100 mg,100 mg",
+        "resp_rate": "0.1,0.5,0.9",
+        "seed": "123",
+        "model": "auto"
+    }
+
+    result1 = await call_tool_ok(mcp_client, ER_TOOL, args)
+    result2 = await call_tool_ok(mcp_client, ER_TOOL, args)
+
+    # Same seed should produce identical binary responses
+    assert result1["resp_rate_generation"]["generated_resp"] == result2["resp_rate_generation"]["generated_resp"]
+    # And therefore identical model parameters
+    assert result1["parameters"] == result2["parameters"]
+
+
 # ==================== PK Tests ====================
 
 @pytest.mark.asyncio
