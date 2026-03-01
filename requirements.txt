@@ -1,5 +1,5 @@
 # requirements.txt - for docker build
-fastmcp>=2.14.0,<3
+fastmcp>=3.0.0
 httpx
 python-dotenv
 uvloop

@@ -4,9 +4,10 @@
 import pytest
 from conftest import call_tool_ok
 
-NCA_TOOL = "r_Noncompartmental_analysis_NCA"
-ER_TOOL = "r_Exposure_response_ER_analysis"
-PK_TOOL = "r_Pharmacokinetic_simulation_IV_1_or_2_CM"
+NCA_TOOL  = "r_Noncompartmental_analysis_NCA"
+ER_TOOL   = "r_Exposure_response_ER_analysis"
+PK_TOOL   = "r_Pharmacokinetic_simulation_IV_1_or_2_CM"
+DATA_TOOL = "r_Format_data_for_pharmacometric_analyses"
 
 
 @pytest.mark.asyncio
@@ -15,7 +16,7 @@ async def test_list_all_tools(mcp_client):
     tools = await mcp_client.list_tools()
     tool_names = [t.name for t in tools]
 
-    for expected in [NCA_TOOL, ER_TOOL, PK_TOOL]:
+    for expected in [NCA_TOOL, ER_TOOL, PK_TOOL, DATA_TOOL]:
         assert expected in tool_names, \
             f"{expected} not found in available tools: {tool_names}"
 
@@ -531,3 +532,161 @@ async def test_pk_with_defaults(mcp_client):
     assert "plot_path" in result
     assert result["n_subjects"] == 60
     assert len(result["summary_by_dose"]) == 3
+
+
+# ==================== DATA Tests ====================
+
+@pytest.mark.asyncio
+async def test_data_tool_in_list(mcp_client):
+    """Test that Format_data_for_pharmacometric_analyses appears in tool list"""
+    tools = await mcp_client.list_tools()
+    tool_names = [t.name for t in tools]
+    assert DATA_TOOL in tool_names, \
+        f"{DATA_TOOL} not found in tools: {tool_names}"
+
+
+@pytest.mark.asyncio
+async def test_data_endpoint_example_file(mcp_client):
+    """Test DATA endpoint with example_pk_data.csv returns correct ADPC structure"""
+    result = await call_tool_ok(mcp_client, DATA_TOOL, {
+        "file_path": "example_pk_data.csv",
+        "route": "extravascular",
+        "conc_unit": "ug/mL"
+    })
+
+    assert result["status"] == "success"
+    assert result["dataset_type"] == "adpc"
+    assert result["source_file"] == "example_pk_data.csv"
+    assert result["n_subjects"] == 3
+    assert result["n_records"] == 15  # 3 subjects × 5 observation time points (dosing row at time 0 filtered)
+    assert "output_file" in result
+    assert result["output_file"].endswith(".csv")
+
+    # Verify all required ADPC columns present
+    expected_cols = ["USUBJID", "ATPTN", "AVAL", "AVALU", "DOSE", "DOSEU", "DOSNO", "ROUTE", "BLQ"]
+    for col in expected_cols:
+        assert col in result["columns"], f"Column '{col}' missing from ADPC output"
+
+    # Verify column mapping reported
+    assert result["input_column_mapping"]["subject_col"] == "ID"
+    assert result["input_column_mapping"]["time_col"] == "TIME"
+    assert result["input_column_mapping"]["conc_col"] == "DV"
+    assert result["input_column_mapping"]["dose_col"] == "AMT"
+
+    # Verify summary
+    assert len(result["summary"]["subjects"]) == 3
+    assert len(result["summary"]["time_range"]) == 2
+    assert len(result["summary"]["conc_range"]) == 2
+    assert len(result["summary"]["dose_per_subject"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_data_endpoint_missing_file_error(mcp_client):
+    """Test DATA endpoint returns actionable error when file not found"""
+    with pytest.raises(Exception) as exc_info:
+        await mcp_client.call_tool(DATA_TOOL, {"file_path": "nonexistent_study.csv"})
+
+    error_msg = str(exc_info.value)
+    assert "nonexistent_study.csv" in error_msg
+    assert "Available in /data" in error_msg
+
+
+@pytest.mark.asyncio
+async def test_data_endpoint_wrong_column_error(mcp_client):
+    """Test DATA endpoint returns actionable error when column name is wrong"""
+    with pytest.raises(Exception) as exc_info:
+        await mcp_client.call_tool(DATA_TOOL, {
+            "file_path": "example_pk_data.csv",
+            "conc_col": "CONC"  # wrong column name
+        })
+
+    error_msg = str(exc_info.value)
+    assert "CONC" in error_msg
+    assert "Available:" in error_msg
+
+
+@pytest.mark.asyncio
+async def test_data_endpoint_unsupported_type_error(mcp_client):
+    """Test DATA endpoint returns actionable error for unsupported dataset_type"""
+    with pytest.raises(Exception) as exc_info:
+        await mcp_client.call_tool(DATA_TOOL, {
+            "file_path": "example_pk_data.csv",
+            "dataset_type": "nonmem_pk"
+        })
+
+    error_msg = str(exc_info.value)
+    assert "nonmem_pk" in error_msg
+    assert "v2" in error_msg.lower() or "v1" in error_msg.lower()
+
+
+# ==================== PK CSV Output Tests ====================
+
+@pytest.mark.asyncio
+async def test_pk_save_csv(mcp_client):
+    """Test PK endpoint with save_csv=true returns output_file field"""
+    result = await call_tool_ok(mcp_client, PK_TOOL, {
+        "dose": "100",
+        "n_subjects": "5",
+        "t": "0,1,2,4,8,12,24",
+        "model": "1cm",
+        "seed": "42",
+        "save_csv": "true"
+    })
+
+    assert "output_file" in result, "output_file field missing when save_csv=true"
+    assert result["output_file"].startswith("pk_simulation_")
+    assert result["output_file"].endswith(".csv")
+
+
+@pytest.mark.asyncio
+async def test_pk_no_csv_by_default(mcp_client):
+    """Test PK endpoint does NOT include output_file when save_csv not set"""
+    result = await call_tool_ok(mcp_client, PK_TOOL, {
+        "dose": "100",
+        "n_subjects": "5",
+        "t": "0,1,2,4,8",
+        "model": "1cm",
+        "seed": "42"
+    })
+
+    assert "output_file" not in result, "output_file should not appear when save_csv is not set"
+
+
+# ==================== NCA data_file Tests ====================
+
+@pytest.mark.asyncio
+async def test_nca_with_data_file(mcp_client):
+    """Test NCA endpoint reads ADPC file produced by /DATA and runs population NCA"""
+    # Step 1: produce ADPC file via DATA endpoint
+    data_result = await call_tool_ok(mcp_client, DATA_TOOL, {
+        "file_path": "example_pk_data.csv",
+        "route": "extravascular",
+        "conc_unit": "ug/mL"
+    })
+    adpc_file = data_result["output_file"]
+
+    # Step 2: run NCA reading that ADPC file
+    nca_result = await call_tool_ok(mcp_client, NCA_TOOL, {
+        "data_file": adpc_file,
+        "route": "extravascular",
+        "conc_unit": "ug/mL"
+    })
+
+    assert nca_result["mode"] == "population"
+    assert nca_result["n_subjects"] == 3
+    assert nca_result["source_file"] == adpc_file
+    assert len(nca_result["individual_results"]) == 3
+
+    for subj_result in nca_result["individual_results"]:
+        assert subj_result["Cmax"]["value"] > 0
+        assert subj_result["auclast"]["value"] > 0
+
+
+@pytest.mark.asyncio
+async def test_nca_data_file_missing_error(mcp_client):
+    """Test NCA endpoint returns actionable error when data_file not found"""
+    with pytest.raises(Exception) as exc_info:
+        await mcp_client.call_tool(NCA_TOOL, {"data_file": "ghost_adpc.csv"})
+
+    error_msg = str(exc_info.value)
+    assert "ghost_adpc.csv" in error_msg

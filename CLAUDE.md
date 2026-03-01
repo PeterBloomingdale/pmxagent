@@ -5,11 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Overview
 
 PMxAgent transforms validated R pharmacometric workflows into AI-ready HTTP APIs. The architecture consists of:
-- **R Plumber API** (modular structure in `apis/`): Pharmacometric endpoints (NCA, ER, PK)
+- **R Plumber API** (modular structure in `apis/`): Pharmacometric endpoints (NCA, ER, PK, DATA)
   - `apis/rapi.R` - Lightweight router using `copy_routes()` helper to compose endpoint modules
   - `apis/endpoints/` - Self-contained endpoint modules with Plumber annotations and dependencies
   - `apis/models/` - Core pharmacometric calculation functions
-  - `apis/utils/` - Shared utilities (validation, plotting, constants)
+  - `apis/utils/` - Shared utilities (validation, plotting, constants, data_processing)
 - **Python MCP Server** (`server.py`): MCP server that exposes R API via Model Context Protocol
 - **Docker orchestration**: Two-container setup with health checks and inter-service communication
 
@@ -171,6 +171,11 @@ Comprehensive NCA endpoint leveraging PKNCA's native features including route of
 - `conc_unit_out` - Preferred output concentration unit label
 - `time_unit_out` - Preferred output time unit label
 
+**File-based input (from /DATA endpoint)**:
+- `data_file` - ADPC CSV filename in /data (output from /DATA endpoint); when provided, reads time/conc/dose/subject_id from file, overrides time/conc/dose string params (string, optional, default "")
+  - When `data_file` is set, the response includes `"source_file": "<filename>"` and runs in population mode automatically
+  - The ADPC file must have columns: USUBJID, ATPTN, AVAL, DOSE (standard /DATA output)
+
 - **Multi-subject mode**: Use pipe (`|`) separator between subjects for time, conc, dose
 - **Returns**: All parameters include value/unit pairs with analysis settings:
   ```json
@@ -313,6 +318,13 @@ Supports three modes:
 - `conc_unit` - Concentration unit for output and plot y-axis (default: "ug/mL")
 - `figure_dir` - Output directory for figures (default: "/figures")
 
+**CSV output params** (for DATA → NCA workflow):
+- `save_csv` - If `"true"`, saves simulated concentration-time data as CSV to `output_dir` (default: `"false"`)
+- `output_dir` - Output directory for CSV file (default: `"/data"`)
+  - CSV columns: `USUBJID, TIME, CONC, DOSE, CONC_UNIT`
+  - Response gains: `"output_file": "pk_simulation_TIMESTAMP.csv"` when `save_csv=true`
+  - The CSV is compatible with `/DATA` (use `subject_col="USUBJID"`, `conc_col="CONC"`, `dose_col="DOSE"`)
+
 **Unit handling**: mrgsolve models output concentrations in **mg/mL** (dose in mg ÷ volume in mL). A conversion factor from `get_conc_conversion_factor()` in `plotting.R` is applied to **both** the returned concentration values and the plot:
 | `conc_unit` | Factor | Conversion |
 |-------------|--------|------------|
@@ -343,6 +355,68 @@ curl -X POST http://localhost:5762/PK \
   -d 'conc_unit=ug/mL'
 ```
 
+### POST /DATA (Data Standardization)
+Reads raw PK data files (CSV or Excel) from `/data` volume, standardizes to CDISC ADaM ADPC-aligned format, and saves output CSV for downstream use by `/NCA`.
+
+- **Required params**: `file_path` - filename within `/data` directory (e.g. `"study.csv"`)
+- **Dataset type**:
+  - `dataset_type` - Processing type: `"adpc"` (default, v1). Future: `"nonmem_pk"` (v2)
+- **Column mapping** (customize to match your input file):
+  - `subject_col` - Column for subject ID (default `"ID"`)
+  - `time_col` - Column for nominal time (default `"TIME"`)
+  - `conc_col` - Column for concentration (default `"DV"`)
+  - `dose_col` - Column for dose (default `"AMT"`); first non-zero per subject
+  - `blq_col` - Column for BLQ flag (string, optional)
+- **Dose fallback**: `dose` - Fallback dose if `dose_col` absent or all-zero (default `"1"`)
+- **Output metadata**:
+  - `conc_unit` - Concentration unit label for AVALU column (default `"ug/mL"`)
+  - `dose_unit` - Dose unit label for DOSEU column (default `"mg"`)
+  - `route` - Route for ROUTE column (default `"extravascular"`)
+  - `output_prefix` - Output filename prefix; default uses input filename stem
+
+**NONMEM AMT-style detection**: If the dose column contains a mix of zero and non-zero values, dosing event rows (AMT > 0) are filtered out and only observation rows (AMT = 0) are kept. If the dose column has non-zero values only (e.g., PK simulation output with DOSE column), all rows are kept.
+
+**Returns**:
+```json
+{
+  "status": "success",
+  "dataset_type": "adpc",
+  "source_file": "study.csv",
+  "output_file": "study_adpc_20260228_123456.csv",
+  "n_subjects": 3,
+  "n_records": 24,
+  "columns": ["USUBJID","ATPTN","AVAL","AVALU","DOSE","DOSEU","DOSNO","ROUTE","BLQ"],
+  "input_column_mapping": {"subject_col":"ID","time_col":"TIME","conc_col":"DV","dose_col":"AMT","blq_col":"(none)"},
+  "summary": {"subjects":[...],"time_range":[0,24],"conc_range":[0.1,10],"dose_per_subject":{"1":100}}
+}
+```
+
+**PK → DATA → NCA workflow**:
+```bash
+# Step 1: PK simulation saves CSV to /data
+curl -X POST http://localhost:5762/PK \
+  -d 'dose=10,30,100' -d 'n_subjects=60' -d 'n_per_dose=20' \
+  -d 'seed=42' -d 'save_csv=true'
+# → output_file: "pk_simulation_20260228_123456.csv"
+
+# Step 2: DATA standardizes PK CSV to ADPC (column names differ from NONMEM defaults)
+curl -X POST http://localhost:5762/DATA \
+  -d 'file_path=pk_simulation_20260228_123456.csv' \
+  -d 'subject_col=USUBJID' -d 'conc_col=CONC' -d 'dose_col=DOSE' \
+  -d 'route=iv_bolus'
+# → output_file: "pk_simulation_20260228_123456_adpc_20260228_123500.csv"
+
+# Step 3: NCA reads ADPC file directly (population mode automatic)
+curl -X POST http://localhost:5762/NCA \
+  -d 'data_file=pk_simulation_20260228_123456_adpc_20260228_123500.csv' \
+  -d 'route=iv_bolus'
+```
+
+**Error messages** (actionable):
+- File not found: `"File not found: 'study.csv'. Available in /data: example_pk_data.csv"`
+- Wrong column: `"Column 'CONC' not found. Available: ID, TIME, DV, AMT. Use conc_col parameter to specify the correct column name."`
+- Unsupported type: `"Unsupported dataset_type 'nonmem_pk'. Supported in v1: 'adpc'. PopPK support coming in v2."`
+
 ## Code Conventions
 
 ### R API Structure
@@ -351,7 +425,7 @@ curl -X POST http://localhost:5762/PK \
 - **Model files** contain pure R functions with no Plumber dependencies
 - **Main router** (`apis/rapi.R`) uses `copy_routes()` helper to compose endpoint modules:
   - Each endpoint file sources its own dependencies (utils, models)
-  - Routes are copied to main router to preserve `/NCA`, `/ER`, `/PK` paths and OpenAPI metadata
+  - Routes are copied to main router to preserve `/NCA`, `/ER`, `/PK`, `/DATA` paths and OpenAPI metadata
 
 ### R API Parameters
 - All numeric inputs passed as strings and parsed with `as.numeric()`
@@ -393,7 +467,8 @@ curl -X POST http://localhost:5762/PK \
 │   ├── endpoints/          # Plumber endpoint handlers
 │   │   ├── nca.R          # NCA endpoint (#* annotations)
 │   │   ├── er.R           # ER endpoint (#* annotations)
-│   │   └── pk.R           # PK endpoint (#* annotations)
+│   │   ├── pk.R           # PK endpoint (#* annotations)
+│   │   └── data.R         # DATA endpoint (#* annotations)
 │   ├── models/            # Pure R calculation functions
 │   │   ├── mrgsolve_pk.R  # simulate_1cm(), simulate_2cm()
 │   │   └── er_models.R    # fit_*_model() functions
@@ -402,12 +477,15 @@ curl -X POST http://localhost:5762/PK \
 │   │   ├── validation.R   # Input validation functions
 │   │   ├── units.R        # NCA unit derivation and formatting
 │   │   ├── colors.R       # Color scheme utilities
-│   │   └── plotting.R     # Plot utilities
+│   │   ├── plotting.R     # Plot utilities
+│   │   └── data_processing.R # Data reading, cleaning, ADPC standardization
 │   └── tests/             # R unit tests
 │       ├── test_nca.R     # NCA ground truth validation
 │       └── test_pk_models.R # PK model unit tests
 ├── tests/                  # Python integration tests
 │   └── test_endpoints.py  # MCP client tests
+├── data/                   # Shared data directory (host ↔ container)
+│   └── example_pk_data.csv # Example 3-subject NONMEM-style PK data
 ├── examples/               # Usage examples and guides
 │   ├── basic_usage.py     # Python client examples
 │   ├── basic_usage.sh     # Curl examples

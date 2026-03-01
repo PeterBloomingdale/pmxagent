@@ -25,6 +25,8 @@
 #* @param time_unit Time unit for plot display: "auto", "hours", "days", or "weeks" (default: "auto" - selects based on range)
 #* @param conc_unit Concentration unit label for plot y-axis (default: "ug/mL")
 #* @param figure_dir Output directory for figures (default: "/figures")
+#* @param save_csv If "true", saves simulated concentration-time data as CSV to output_dir (default: "false")
+#* @param output_dir Output directory for CSV file when save_csv="true" (default: "/data")
 #* @post /PK
 #* @serializer unboxedJSON
 function(dose = "10,30,100",
@@ -43,9 +45,36 @@ function(dose = "10,30,100",
          seed = "42",
          time_unit = "auto",
          conc_unit = "ug/mL",
-         figure_dir = "/figures") {
+         figure_dir = "/figures",
+         save_csv = "false",
+         output_dir = "/data") {
 
   tryCatch({
+    # Parse save_csv flag
+    do_save_csv <- isTRUE(trimws(tolower(save_csv)) == "true")
+
+    # Helper: save simulation data as CSV and return output filename
+    save_pk_csv <- function(individual_data_list, out_dir, conc_unit_label) {
+      dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+      timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+      out_name  <- sprintf("pk_simulation_%s.csv", timestamp)
+      out_path  <- file.path(out_dir, out_name)
+
+      rows <- lapply(individual_data_list, function(subj) {
+        data.frame(
+          USUBJID   = subj$subject_id,
+          TIME      = subj$times,
+          CONC      = subj$concentrations,
+          DOSE      = subj$dose,
+          CONC_UNIT = conc_unit_label,
+          stringsAsFactors = FALSE
+        )
+      })
+      csv_df <- do.call(rbind, rows)
+      write.csv(csv_df, out_path, row.names = FALSE)
+      out_name
+    }
+
     # Validate required inputs
     validate_string_input(dose, "dose")
     validate_string_input(t, "t")
@@ -220,8 +249,13 @@ function(dose = "10,30,100",
                                      time_unit = time_unit, conc_unit = conc_unit)
       outfile <- save_pmx_plot(p, "PK", outdir = figure_dir)
 
+      # Optionally save CSV
+      csv_filename <- if (do_save_csv) {
+        save_pk_csv(individual_data, output_dir, conc_unit)
+      } else NULL
+
       # Return population results
-      return(list(
+      pop_result_out <- list(
         mode = "population",
         model_used = model_used,
         n_subjects = n_subj,
@@ -246,7 +280,9 @@ function(dose = "10,30,100",
         summary_by_dose = summary_by_dose,
         plot_path = outfile,
         seed = seed_val
-      ))
+      )
+      if (!is.null(csv_filename)) pop_result_out$output_file <- csv_filename
+      return(pop_result_out)
 
     } else {
       # ========== EXPLICIT PARAMETER MODE (per-kg values scaled by BW) ==========
@@ -392,7 +428,12 @@ function(dose = "10,30,100",
                                        time_unit = time_unit, conc_unit = conc_unit)
         outfile <- save_pmx_plot(p, "PK", outdir = figure_dir)
 
-        return(list(
+        # Optionally save CSV
+        csv_filename_ms <- if (do_save_csv) {
+          save_pk_csv(individual_data, output_dir, conc_unit)
+        } else NULL
+
+        multi_result <- list(
           mode = "population",
           model_used = model_used,
           n_subjects = n_subj,
@@ -403,7 +444,9 @@ function(dose = "10,30,100",
           individual_data = individual_data,
           summary_by_dose = summary_by_dose,
           plot_path = outfile
-        ))
+        )
+        if (!is.null(csv_filename_ms)) multi_result$output_file <- csv_filename_ms
+        return(multi_result)
 
       } else {
         # ========== SINGLE-SUBJECT MODE ==========
@@ -467,7 +510,18 @@ function(dose = "10,30,100",
 
         outfile <- save_pmx_plot(p, "PK", outdir = figure_dir)
 
-        list(
+        # Optionally save CSV (single subject)
+        single_individual_data <- list(list(
+          subject_id = "SUBJ001",
+          times = ts,
+          concentrations = round(converted_conc, 4),
+          dose = dose_val
+        ))
+        csv_filename_single <- if (do_save_csv) {
+          save_pk_csv(single_individual_data, output_dir, conc_unit)
+        } else NULL
+
+        single_result <- list(
           mode = "single",
           times = ts,
           concentrations = round(converted_conc, 4),
@@ -478,6 +532,8 @@ function(dose = "10,30,100",
           model_used = model_used,
           plot_path = outfile
         )
+        if (!is.null(csv_filename_single)) single_result$output_file <- csv_filename_single
+        single_result
       }
     }
 

@@ -19,6 +19,7 @@ source("utils/units.R")
 source("utils/pknca_units.R")
 source("utils/colors.R")
 source("utils/plotting.R")
+source("utils/data_processing.R")
 source("models/mrgsolve_pk.R")
 source("models/er_models.R")
 
@@ -51,16 +52,24 @@ copy_routes <- function(main_pr, sub_pr) {
 
 #* @plumber
 function(pr) {
+  # Custom error handler: include the actual error message in the response
+  pr <- pr_set_error(pr, function(req, res, err) {
+    res$status <- 500
+    list(error = conditionMessage(err))
+  })
+
   # Load endpoint routers (dependencies already loaded above)
-  nca_router <- plumb("endpoints/nca.R")
-  er_router <- plumb("endpoints/er.R")
-  pk_router <- plumb("endpoints/pk.R")
+  nca_router  <- plumb("endpoints/nca.R")
+  er_router   <- plumb("endpoints/er.R")
+  pk_router   <- plumb("endpoints/pk.R")
+  data_router <- plumb("endpoints/data.R")
 
   # Copy routes from each sub-router to main router
-  # This preserves the original paths (/NCA, /ER, /PK) and OpenAPI metadata
+  # This preserves the original paths (/NCA, /ER, /PK, /DATA) and OpenAPI metadata
   pr <- copy_routes(pr, nca_router)
   pr <- copy_routes(pr, er_router)
   pr <- copy_routes(pr, pk_router)
+  pr <- copy_routes(pr, data_router)
 
   pr
 }

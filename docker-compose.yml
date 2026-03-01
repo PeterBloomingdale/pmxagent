@@ -33,9 +33,10 @@ services:
       retries: 3
       start_period: 30s
 
-    # Volume for figure output
+    # Volume for figure output and data files
     volumes:
       - ./figures:/figures
+      - ./data:/data
 
     # Restart policy
     restart: unless-stopped
@@ -75,6 +76,8 @@ services:
       RAPI_OPENAPI_URL: http://rapi:8000/openapi.json
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: "INFO"
+      MCP_BASE_URL: http://localhost:8000
+      MCP_TEST_TOKEN: "pmxagent-ci-token"
 
     # Note: No health check for mcp - FastMCP only serves SSE endpoint
     # Container health is monitored by Docker based on process status

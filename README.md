@@ -6,7 +6,7 @@
 [![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 [![R](https://img.shields.io/badge/r-%23276DC3.svg?style=flat&logo=r&logoColor=white)](https://www.r-project.org/)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-60%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-49%20passing-brightgreen)](tests/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 ---
@@ -20,7 +20,7 @@
 │  ┌────────────────────┐                 ┌────────────────────┐          │
 │  │   R Plumber API    │    OpenAPI      │   MCP Server (Host)│          │
 │  │                    │────────────────▶│                    │          │
-│  │   /NCA  /ER  /PK   │◀───────────────▶│      FastMCP       │          │
+│  │   /NCA  /ER  /PK  /DATA   │◀───────────────▶│      FastMCP       │          │
 │  │   PKNCA, mrgsolve  │      HTTP       └──────────┬─────────┘          │
 │  └────────────────────┘                            │                    │
 └────────────────────────────────────────────────────┼────────────────────┘
@@ -134,18 +134,51 @@ curl http://localhost:5762/openapi.json  # Should return JSON
 
 ## 🎯 What Can PMxAgent Do?
 
-PMxAgent provides three core pharmacometric endpoints accessible via HTTP API:
+PMxAgent provides four core pharmacometric endpoints accessible via HTTP API:
 
 | Endpoint | Purpose | Key Features |
 |----------|---------|--------------|
-| `POST /NCA` | Non-compartmental analysis | Cmax, Tmax, AUC, half-life; multi-subject mode; automatic unit derivation |
+| `POST /NCA` | Non-compartmental analysis | Cmax, Tmax, AUC, half-life; multi-subject mode; automatic unit derivation; reads ADPC files via `data_file` |
 | `POST /ER` | Exposure-response modeling | Auto-select best model by AIC; gold-standard two-panel visualization |
-| `POST /PK` | PK simulation | 1- or 2-compartment IV; population mode with between-subject variability |
+| `POST /PK` | PK simulation | 1- or 2-compartment IV; population mode with between-subject variability; optional CSV output |
+| `POST /DATA` | Data formatting | Reads raw CSV/Excel from `/data` volume; standardizes to CDISC ADPC format; saves output for downstream NCA |
+
+### Data Formatting Guide
+
+The `/DATA` endpoint accepts raw CSV or Excel files with any column naming convention. Column names are specified via parameters; the defaults match NONMEM output style.
+
+| Parameter | Default | Common Alternatives |
+|-----------|---------|-------------------|
+| `subject_col` | `ID` | `USUBJID`, `SUBID`, `SUBJECT`, `SUBJID` |
+| `time_col` | `TIME` | `TAD`, `NTIM`, `ATPTN`, `HR` |
+| `conc_col` | `DV` | `CONC`, `AVAL`, `CP`, `COBS` |
+| `dose_col` | `AMT` | `DOSE`, `AMTDOS` (or omit; use `dose` fallback) |
+| `blq_col` | _(none)_ | `BLQ`, `MDV`, `LLOQ` |
+
+**When column names don't match defaults**, specify them explicitly:
+```bash
+curl -X POST http://localhost:5762/DATA \
+  -d 'file_path=study_output.csv' \
+  -d 'subject_col=USUBJID' \
+  -d 'time_col=NTIM' \
+  -d 'conc_col=COBS' \
+  -d 'dose_col=DOSE'
+```
+
+**When using with AI agents**: The endpoint returns actionable errors listing available column names when a specified column is not found. Agents use these messages to self-correct without human intervention:
+```
+Column 'DV' not found. Available: Patient_ID, Hours, Conc_ngmL, DoseMg. Use conc_col parameter to specify the correct column name.
+```
+
+**NONMEM AMT-style detection**: When the dose column contains a mix of zero and non-zero values, dosing event rows (AMT > 0) are automatically filtered; only observation rows (AMT = 0) are kept. When all values are non-zero (e.g., PK simulation CSV with a constant DOSE column), all rows are kept.
+
+**Output format (CDISC ADaM ADPC-aligned)**:
+`USUBJID, ATPTN, AVAL, AVALU, DOSE, DOSEU, DOSNO, ROUTE, BLQ`
 
 **Access PMxAgent:**
 - **API Documentation & Testing:** [http://localhost:5762/__docs__/](http://localhost:5762/__docs__/)
 - **OpenAPI Specification:** [http://localhost:5762/openapi.json](http://localhost:5762/openapi.json)
-- **MCP Endpoint (for AI agents):** [http://localhost:8000/messages](http://localhost:8000/messages)
+- **MCP Endpoint (for AI agents):** [http://localhost:8000/mcp](http://localhost:8000/mcp)
 
 ### Unit Handling
 
@@ -220,8 +253,8 @@ Configure via Cursor's Settings UI:
 {
     "mcpServers": {
         "PMx MCP": {
-            "url": "http://localhost:8000/messages",
-            "transport": "sse"
+            "type": "http",
+            "url": "http://localhost:8000/mcp"
         }
     }
 }
@@ -229,12 +262,7 @@ Configure via Cursor's Settings UI:
 
 ### Claude Code
 
-Claude Code auto-discovers running MCP servers:
-
-1. Ensure PMxAgent is running:
-2. Start Claude Code:
-3. Tools are automatically available - verify by asking: *"What tools do you have?"*
-4. Ask Claude to discover and connect to tools
+A `.mcp.json` file is included in the repository root. Claude Code reads this automatically when run from the project directory. On first connection, Claude Code will open a browser window to complete the OAuth authorization flow — click **Approve** to continue. Subsequent reconnections use stored tokens automatically.
 
 ### Claude Desktop
 
@@ -250,7 +278,8 @@ Configure via the Claude Desktop config file:
 {
   "mcpServers": {
     "pmxagent": {
-      "url": "http://localhost:8000/messages",
+      "type": "http",
+      "url": "http://localhost:8000/mcp",
       "description": "PMxAgent - Pharmacometric analysis tools"
     }
   }
@@ -274,15 +303,17 @@ PMxAgent's R API is modularized for maintainability:
 vim apis/endpoints/nca.R    # NCA endpoint
 vim apis/endpoints/er.R     # ER endpoint
 vim apis/endpoints/pk.R     # PK endpoint
+vim apis/endpoints/data.R   # DATA endpoint
 
 # Edit model calculations
 vim apis/models/mrgsolve_pk.R   # PK compartment models (mrgsolve-based)
 vim apis/models/er_models.R     # ER model fitting
 
 # Edit utilities
-vim apis/utils/validation.R    # Input validation
-vim apis/utils/plotting.R      # Plotting utilities
-vim apis/utils/constants.R     # Configuration constants
+vim apis/utils/validation.R       # Input validation
+vim apis/utils/plotting.R         # Plotting utilities
+vim apis/utils/constants.R        # Configuration constants
+vim apis/utils/data_processing.R  # Data processing utilities
 
 # Rebuild after changes
 docker compose up --build
@@ -292,11 +323,11 @@ Output figures save to `figures/` directory. All changes persist across containe
 
 ### Test Suite
 
-PMxAgent includes **60 total tests**: 38 Python integration tests (via pytest) and 22 R unit tests.
+PMxAgent includes **71 total tests**: 49 Python integration tests (via pytest) and 22 R unit tests.
 
 | Test File | Tests | Description |
 |-----------|-------|-------------|
-| `tests/test_endpoints.py` | 25 | MCP endpoint integration tests (includes parametrized route and business rule tests) |
+| `tests/test_endpoints.py` | 36 | MCP endpoint integration tests (includes parametrized route and business rule tests, DATA endpoint, PK CSV output, and NCA data_file chain) |
 | `tests/test_validation.py` | 13 | Input validation and error handling |
 | `tests/conftest.py` | — | Shared fixtures, helpers, and constants |
 | `apis/tests/test_nca.R` | 16 | NCA ground truth, route validation, dosing scenarios, BLQ handling, business rules, PKNCA options |
@@ -315,13 +346,13 @@ docker compose up -d
 docker compose ps
 ```
 
-#### Python Integration Tests (38 tests)
+#### Python Integration Tests (40 tests)
 
 Test all three pharmacometric endpoints via PMxAgent's MCP interface:
 
 ```bash
 # Run all integration tests
-pytest tests/ -v
+MCP_TEST_TOKEN=pmxagent-ci-token pytest tests/ -v
 
 # Run specific test
 pytest tests/test_endpoints.py::test_nca_endpoint -v
@@ -334,6 +365,8 @@ pytest tests/ -v --cov=tests --cov-report=term-missing
 - ✅ NCA calculations (Cmax, Tmax, AUC, half-life)
 - ✅ Exposure-response model fitting (linear, Emax, Imax, logit)
 - ✅ PK simulations (1-compartment and 2-compartment models)
+- ✅ Data formatting and ADPC standardization
+- ✅ PK → DATA → NCA file-based workflow chain
 - ✅ Input validation and error handling
 - ✅ MCP tool discovery and invocation
 
@@ -347,12 +380,14 @@ tests/test_endpoints.py::test_nca_routes[extravascular-...] PASSED
 tests/test_endpoints.py::test_nca_business_rules[...] PASSED
 tests/test_endpoints.py::test_er_endpoint PASSED
 tests/test_endpoints.py::test_pk_endpoint_1cm PASSED
+tests/test_endpoints.py::test_data_endpoint_example_file PASSED
+tests/test_endpoints.py::test_nca_with_data_file PASSED
 ...
 tests/test_validation.py::test_nca_mismatched_lengths PASSED
 tests/test_validation.py::test_nca_negative_dose PASSED
 tests/test_validation.py::test_pk_negative_time PASSED
 
-======================== 38 passed in 13.15s ========================
+======================== 49 passed in 25.36s ========================
 ```
 
 #### R Unit Tests (22 tests)
@@ -380,7 +415,8 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_pk_models.R
 │   ├── endpoints/           # Plumber endpoint handlers
 │   │   ├── nca.R           # NCA endpoint
 │   │   ├── er.R            # ER endpoint
-│   │   └── pk.R            # PK endpoint
+│   │   ├── pk.R            # PK endpoint
+│   │   └── data.R          # DATA endpoint
 │   ├── models/             # Core model calculations
 │   │   ├── mrgsolve_pk.R   # mrgsolve-based 1CM and 2CM models
 │   │   ├── er_models.R     # ER model fitting functions
@@ -391,7 +427,8 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_pk_models.R
 │   │   ├── validation.R    # Input validation functions
 │   │   ├── units.R         # Unit derivation and formatting
 │   │   ├── colors.R        # Color scheme utilities
-│   │   └── plotting.R      # Plotting utilities
+│   │   ├── plotting.R      # Plotting utilities
+│   │   └── data_processing.R  # Data processing utilities
 │   └── tests/              # R unit tests
 │       ├── test_nca.R      # NCA ground truth validation
 │       └── test_pk_models.R # PK model unit tests
@@ -399,6 +436,8 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_pk_models.R
 │   ├── conftest.py         # Shared fixtures and helpers
 │   ├── test_endpoints.py   # MCP endpoint tests
 │   └── test_validation.py  # Input validation tests
+├── data/                    # Shared data directory (host ↔ container)
+│   └── example_pk_data.csv  # Example 3-subject NONMEM-style PK data
 ├── server.py               # MCP server entry point
 ├── docker-compose.yml      # Container orchestration
 └── figures/                # Generated plot outputs
@@ -470,7 +509,7 @@ lsof -i :8000
 - Ensure PMxAgent is running: `docker compose up -d`
 - Wait for services to be healthy (~10s): `docker compose ps`
 - Verify R API is accessible: `curl http://localhost:5762/openapi.json`
-- Verify MCP endpoint: `curl http://localhost:8000/health` (may return 404, but should connect)
+- Verify MCP endpoint: `curl -H "Authorization: Bearer pmxagent-ci-token" http://localhost:8000/mcp`
 - Check service logs: `docker compose logs`
 - Reinstall test dependencies: `pip install -r requirements-dev.txt`
 - Run single test to isolate issue: `pytest tests/test_endpoints.py::test_nca_endpoint -v`
@@ -480,8 +519,10 @@ lsof -i :8000
 **Problem:** Cursor or Claude Desktop can't discover PMxAgent's tools
 
 **Solutions:**
-- Verify PMxAgent is running: `curl http://localhost:8000/health`
-- Check MCP endpoint URL is correct: `http://localhost:8000/messages`
+- Verify OAuth discovery: `curl http://localhost:8000/.well-known/oauth-authorization-server`
+- Check MCP endpoint URL is correct: `http://localhost:8000/mcp` (not `/messages`)
+- On first connection, Claude Code/Cursor will prompt for OAuth authorization in browser — approve to continue
+- Tokens expire after 1 hour; reconnect triggers automatic re-authentication
 - Restart PMxAgent: `docker compose restart`
 - Check client configuration files match examples
 

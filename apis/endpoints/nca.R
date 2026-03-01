@@ -32,6 +32,7 @@
 #* @param first_tmax Use first Tmax if tied: "true" or "false" (string, optional, default "true")
 #* @param conc_unit_out Preferred output concentration unit (string, optional)
 #* @param time_unit_out Preferred output time unit (string, optional)
+#* @param data_file ADPC CSV filename in /data (output from /DATA endpoint); when provided, reads time/conc/dose/subject_id from file (string, optional)
 #* @post /NCA
 #* @serializer unboxedJSON
 function(time = "0,0.25,0.5,1,2,4,8,12,24",
@@ -41,6 +42,7 @@ function(time = "0,0.25,0.5,1,2,4,8,12,24",
          subject_id = NULL,
          dose_label = NULL,
          pk_data = NULL,
+         data_file = NULL,
          dose_unit = "mg",
          conc_unit = "ug/mL",
          time_unit = "h",
@@ -125,6 +127,65 @@ function(time = "0,0.25,0.5,1,2,4,8,12,24",
     # Check if pk_data JSON is provided (workflow chaining mode)
     if (!is.null(pk_data) && nchar(trimws(pk_data)) > 0) {
       return(process_pk_data_nca(pk_data, config))
+    }
+
+    # Check if data_file is provided (DATA → NCA file-based workflow)
+    if (!is.null(data_file) && nchar(trimws(data_file)) > 0) {
+      adpc_path <- file.path("/data", data_file)
+      if (!file.exists(adpc_path)) {
+        available <- list.files("/data", pattern = "\\.(csv|xlsx|xls)$", ignore.case = TRUE)
+        avail_str <- if (length(available) > 0) paste(available, collapse = ", ") else "(none)"
+        stop(sprintf("data_file not found: '%s'. Available in /data: %s", data_file, avail_str))
+      }
+
+      adpc_df <- read_data_file(adpc_path)
+
+      # Expect ADPC columns: USUBJID, ATPTN, AVAL, DOSE
+      required_adpc <- c("USUBJID", "ATPTN", "AVAL", "DOSE")
+      validate_file_columns(adpc_df, required_adpc)
+
+      # Convert ADPC to pipe-delimited NCA inputs grouped by subject
+      subjects <- unique(adpc_df$USUBJID)
+      time_parts  <- character(length(subjects))
+      conc_parts  <- character(length(subjects))
+      dose_parts  <- character(length(subjects))
+
+      for (i in seq_along(subjects)) {
+        s <- subjects[i]
+        sdf <- adpc_df[adpc_df$USUBJID == s, ]
+        sdf <- sdf[order(sdf$ATPTN), ]
+        time_parts[i] <- paste(sdf$ATPTN, collapse = ",")
+        conc_parts[i] <- paste(sdf$AVAL, collapse = ",")
+        dose_parts[i] <- as.character(sdf$DOSE[1])
+      }
+
+      time        <- paste(time_parts, collapse = "|")
+      conc        <- paste(conc_parts, collapse = "|")
+      dose        <- paste(dose_parts, collapse = "|")
+      subject_id  <- paste(subjects, collapse = "|")
+
+      # Carry over unit labels from ADPC columns if present and not overridden by caller
+      if ("AVALU" %in% names(adpc_df) && conc_unit == "ug/mL") {
+        avalu_vals <- unique(adpc_df$AVALU[!is.na(adpc_df$AVALU) & nchar(trimws(adpc_df$AVALU)) > 0])
+        if (length(avalu_vals) == 1) conc_unit <- avalu_vals[1]
+      }
+      if ("ROUTE" %in% names(adpc_df) && route == "extravascular") {
+        route_vals <- unique(adpc_df$ROUTE[!is.na(adpc_df$ROUTE) & nchar(trimws(adpc_df$ROUTE)) > 0])
+        if (length(route_vals) == 1) route <- route_vals[1]
+      }
+
+      # Re-validate after reading ADPC (conc_unit / route may have changed)
+      validate_nca_units(dose_unit, conc_unit, time_unit, bw_value)
+      validate_route(route, infusion_dur_val)
+
+      # Update config with potentially updated units/route
+      config$conc_unit <- conc_unit
+      config$route     <- route
+
+      # Run as population NCA and tag the source file
+      result <- run_population_nca(time, conc, dose, subject_id, dose_label, config)
+      result$source_file <- data_file
+      return(result)
     }
 
     # Validate inputs are not empty
