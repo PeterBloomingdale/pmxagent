@@ -55,6 +55,7 @@ jobs:
           pytest tests/ -v --cov=tests --cov-report=term-missing --cov-report=xml
         env:
           PYTHONUNBUFFERED: 1
+          MCP_TEST_TOKEN: "pmxagent-ci-token"
 
       - name: Upload coverage reports
         uses: codecov/codecov-action@v4
