@@ -1,18 +1,18 @@
 # endpoints/nca.R
 # Non-compartmental analysis endpoint
-# Supports both single-subject and multi-subject (population) analysis
+# Supports single-subject and population analysis via data_file (PK→DATA→NCA workflow)
 # With full unit handling, route of administration, dosing scenarios, and business rules
 
 #* Noncompartmental analysis (NCA)
 #* Calculates Cmax, Tmax, auclast, half-life, and additional PK parameters using PKNCA.
-#* Supports multi-subject analysis using pipe (|) separator between subjects.
+#* For population (multi-subject) analysis, provide data_file with the output of the /DATA endpoint.
 #* All results include units derived from input parameters.
-#* @param time Comma-separated time points; use pipe (|) to separate subjects for multi-subject, e.g. "0,1,2,4|0,1,2,4"
-#* @param conc Comma-separated concentrations; use pipe (|) to separate subjects, e.g. "10,8,6,4|12,9,7,5"
+#* @param time Comma-separated time points (string)
+#* @param conc Comma-separated concentrations (string)
 #* @param params (optional) Comma-separated list of additional PK parameters to return
-#* @param dose Dose amount(s) (string, optional, default "1"); pipe-separated for multi-subject
-#* @param subject_id Pipe-separated subject IDs (string, optional)
-#* @param dose_label Pipe-separated dose labels for grouping (string, optional)
+#* @param dose Dose amount (string, optional, default "1")
+#* @param subject_id Subject ID label for single-subject use (string, optional)
+#* @param dose_label Dose label for grouping (string, optional)
 #* @param pk_data JSON-encoded PK data from /PK endpoint for workflow chaining (string, optional)
 #* @param dose_unit Unit of dose: "mg" or "mg/kg" (string, optional, default "mg")
 #* @param conc_unit Unit of input concentration data (string, optional, default "ug/mL")

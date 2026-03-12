@@ -61,5 +61,8 @@ dev/
 # Manuscript (entire directory)
 manuscript/
 
+# Vignettes
+vignettes/
+
 # Explicit pycache in subdirs
 tests/__pycache__/

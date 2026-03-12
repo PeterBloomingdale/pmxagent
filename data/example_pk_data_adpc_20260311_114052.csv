@@ -1,0 +1,16 @@
+"USUBJID","ATPTN","AVAL","AVALU","DOSE","DOSEU","DOSNO","ROUTE","BLQ"
+"1",1,8.2,"ug/mL",100,"mg",1,"extravascular",0
+"1",2,6.1,"ug/mL",100,"mg",1,"extravascular",0
+"1",4,3.5,"ug/mL",100,"mg",1,"extravascular",0
+"1",8,1.2,"ug/mL",100,"mg",1,"extravascular",0
+"1",12,0.4,"ug/mL",100,"mg",1,"extravascular",0
+"2",1,9.5,"ug/mL",100,"mg",1,"extravascular",0
+"2",2,7.3,"ug/mL",100,"mg",1,"extravascular",0
+"2",4,4.1,"ug/mL",100,"mg",1,"extravascular",0
+"2",8,1.8,"ug/mL",100,"mg",1,"extravascular",0
+"2",12,0.6,"ug/mL",100,"mg",1,"extravascular",0
+"3",1,7.8,"ug/mL",100,"mg",1,"extravascular",0
+"3",2,5.9,"ug/mL",100,"mg",1,"extravascular",0
+"3",4,3.2,"ug/mL",100,"mg",1,"extravascular",0
+"3",8,1,"ug/mL",100,"mg",1,"extravascular",0
+"3",12,0.3,"ug/mL",100,"mg",1,"extravascular",0

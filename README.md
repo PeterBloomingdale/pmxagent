@@ -20,7 +20,7 @@
 │  ┌────────────────────┐                 ┌────────────────────┐          │
 │  │   R Plumber API    │    OpenAPI      │   MCP Server (Host)│          │
 │  │                    │────────────────▶│                    │          │
-│  │   /NCA  /ER  /PK  /DATA   │◀───────────────▶│      FastMCP       │          │
+│  │ /NCA /ER /PK /DATA │◀───────────────▶│      FastMCP       │          │
 │  │   PKNCA, mrgsolve  │      HTTP       └──────────┬─────────┘          │
 │  └────────────────────┘                            │                    │
 └────────────────────────────────────────────────────┼────────────────────┘
@@ -141,7 +141,7 @@ PMxAgent provides four core pharmacometric endpoints accessible via HTTP API:
 | `POST /NCA` | Non-compartmental analysis | Cmax, Tmax, AUC, half-life; multi-subject mode; automatic unit derivation; reads ADPC files via `data_file` |
 | `POST /ER` | Exposure-response modeling | Auto-select best model by AIC; gold-standard two-panel visualization |
 | `POST /PK` | PK simulation | 1- or 2-compartment IV; population mode with between-subject variability; optional CSV output |
-| `POST /DATA` | Data formatting | Reads raw CSV/Excel from `/data` volume; standardizes to CDISC ADPC format; saves output for downstream NCA |
+| `POST /DATA` | Data formatting | Reads raw CSV/Excel from `/data/` (host directory bind-mounted into the R API container); standardizes to CDISC ADPC format; saves output for downstream NCA |
 
 ### Data Formatting Guide
 
@@ -292,6 +292,24 @@ ChatGPT does **not** currently support the MCP protocol. Will update when more i
 
 ---
 
+## 🔧 Tool Naming & Agent Discovery
+
+PMxAgent tool names are derived automatically from the first `#*` annotation line in each R endpoint file. The pipeline is:
+**R annotation → OpenAPI `summary` → FastMCP sanitization → `r_` prefix** — no manual configuration required.
+
+| R endpoint file | First `#*` annotation line | MCP tool name |
+|-----------------|---------------------------|---------------|
+| `apis/endpoints/nca.R` | `Noncompartmental analysis (NCA)` | `r_Noncompartmental_analysis_NCA` |
+| `apis/endpoints/er.R` | `Exposure-response (ER) analysis` | `r_Exposure_response_ER_analysis` |
+| `apis/endpoints/pk.R` | `Pharmacokinetic simulation (IV; 1- or 2-CM)` | `r_Pharmacokinetic_simulation_IV_1_or_2_CM` |
+| `apis/endpoints/data.R` | `Format data for pharmacometric analyses` | `r_Format_data_for_pharmacometric_analyses` |
+
+Sanitization rule: non-alphanumeric characters → `_`, consecutive underscores collapsed, `r_` prepended. To rename a tool, edit the first `#*` line and rebuild.
+
+For the full pipeline (naming rules, complete per-tool schemas, `@param` best practices, and a step-by-step new endpoint walkthrough), see [`vignettes/tool_naming_and_discovery.qmd`](vignettes/tool_naming_and_discovery.qmd).
+
+---
+
 ## 🛠️ Development
 
 ### Editing the Code
@@ -346,9 +364,9 @@ docker compose up -d
 docker compose ps
 ```
 
-#### Python Integration Tests (40 tests)
+#### Python Integration Tests (49 tests)
 
-Test all three pharmacometric endpoints via PMxAgent's MCP interface:
+Test all four pharmacometric tools via PMxAgent's MCP interface:
 
 ```bash
 # Run all integration tests
@@ -436,11 +454,11 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_pk_models.R
 │   ├── conftest.py         # Shared fixtures and helpers
 │   ├── test_endpoints.py   # MCP endpoint tests
 │   └── test_validation.py  # Input validation tests
-├── data/                    # Shared data directory (host ↔ container)
+├── data/                    # Host directory bind-mounted into rapi container at /data/ (rapi only — mcp has no volume mounts)
 │   └── example_pk_data.csv  # Example 3-subject NONMEM-style PK data
 ├── server.py               # MCP server entry point
 ├── docker-compose.yml      # Container orchestration
-└── figures/                # Generated plot outputs
+└── figures/                # Host directory bind-mounted into rapi container at /figures/ — generated plots persist here
 ```
 
 ---
@@ -496,10 +514,12 @@ lsof -i :8000
 
 **Problem:** Plots not saving to `figures/` directory
 
+**Note:** `figures/` and `data/` are **bind mounts** (host directories mapped into the `rapi` container), not named Docker volumes — they will not appear in Docker Desktop's "Volumes" panel. They are ordinary directories on your host filesystem.
+
 **Solutions:**
 - Check directory permissions: `chmod 755 figures`
 - View container logs: `docker compose logs rapi`
-- Verify Docker volume mount is working: `docker compose down && docker compose up -d`
+- Verify bind mount is working: `docker compose down && docker compose up -d`
 
 ### Tests failing
 

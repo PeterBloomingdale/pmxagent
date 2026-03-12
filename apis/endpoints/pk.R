@@ -1,9 +1,9 @@
 # endpoints/pk.R
 # Pharmacokinetic simulation endpoint
-# Supports single-subject, multi-subject (explicit params), and population (TV + OMEGA) simulations
+# Supports single-subject, multi-subject (explicit params), and population (TV + BSV) simulations
 
 #* Pharmacokinetic simulation (IV; 1- or 2-CM)
-#* Simulates plasma concentration-time profile for a one or two compartment model with a single IV bolus dose.
+#* Simulates plasma concentration-time profile for a one or two compartment model with IV bolus dose(s); population mode supports multiple doses.
 #* Supports three modes:
 #* 1. Single-subject: Single values for dose, CL, V1, etc.
 #* 2. Multi-subject (explicit): Comma-separated CL, V1, etc. for each subject

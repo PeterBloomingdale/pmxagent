@@ -33,7 +33,8 @@ def is_error_response(result: dict) -> bool:
 @pytest_asyncio.fixture(loop_scope="function")
 async def mcp_client():
     """Shared MCP client connection with Bearer token auth for CI tests."""
-    transport = StreamableHttpTransport(BASE_URL, auth=_TEST_TOKEN if _TEST_TOKEN else None)
+    headers = {"Authorization": f"Bearer {_TEST_TOKEN}"} if _TEST_TOKEN else None
+    transport = StreamableHttpTransport(BASE_URL, headers=headers)
     async with Client(transport) as c:
         yield c
 
