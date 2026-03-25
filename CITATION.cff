@@ -27,7 +27,7 @@ authors:
 
 repository-code: "https://github.com/peterbloomingdale/PMxAgent"
 url: "https://github.com/peterbloomingdale/PMxAgent"
-license: Apache-2.0
+license: AGPL-3.0-only
 license-url: "https://github.com/peterbloomingdale/PMxAgent/blob/main/LICENSE"
 
 keywords:
@@ -92,7 +92,7 @@ references:
 #   year = {2026},
 #   url = {https://github.com/peterbloomingdale/PMxAgent},
 #   version = {0.1.0},
-#   license = {Apache-2.0}
+#   license = {AGPL-3.0-only}
 # }
 
 # APA format:

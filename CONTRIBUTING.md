@@ -261,7 +261,14 @@ open http://localhost:5762/__docs__/
 
 ## License
 
-By contributing to PMxAgent, you agree that your contributions will be licensed under the same license as the project.
+PMxAgent is licensed under `AGPL-3.0-only` (see `LICENSE`).
+
+For non-trivial pull requests, contributors must sign the Contributor License Agreement (CLA) before a PR is merged.
+- CLA document: `CONTRIBUTOR_LICENSE_AGREEMENT.md`
+- Signing method: Add the following exact statement as a comment on your PR:
+  - `I have read the CLA and agree to its terms.`
+
+Trivial fixes (for example, typo corrections and minor documentation edits) are exempt from the CLA requirement.
 
 ---
 
