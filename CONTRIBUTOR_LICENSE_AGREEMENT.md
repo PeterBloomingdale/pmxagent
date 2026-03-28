@@ -5,11 +5,11 @@ This Contributor License Agreement ("Agreement") applies to all non-trivial cont
 ## Parties
 
 - **Contributor**: The individual or entity submitting a contribution.
-- **Project Maintainer**: Peter Bloomingdale, in his personal capacity.
+- **Project Maintainer**: Generate Biomedicines.
 
 ## 1. Copyright Assignment
 
-For each contribution submitted to PMxAgent, the Contributor irrevocably assigns to Peter Bloomingdale all right, title, and interest in and to the contribution, including all copyrights and related rights, on a worldwide, perpetual basis.
+For each contribution submitted to PMxAgent, the Contributor irrevocably assigns to Generate Biomedicines all right, title, and interest in and to the contribution, including all copyrights and related rights, on a worldwide, perpetual basis.
 
 This assignment is made to ensure the project can be maintained and evolved as a coherent whole, and to preserve the ability to make project-wide decisions (such as relicensing) in the future.
 
@@ -23,7 +23,7 @@ The Contributor represents and warrants that:
 
 ## 3. Contributor Retained Rights
 
-The Contributor retains the right to use their own contribution for any purpose, subject to third-party rights and applicable law.
+Generate Biomedicines grants back to the Contributor a perpetual, irrevocable, worldwide, royalty-free, non-exclusive license to use, reproduce, modify, distribute, and sublicense the contribution for any purpose, including in other projects, subject to third-party rights and applicable law.
 
 ## 4. Project License
 
@@ -48,4 +48,4 @@ This Agreement is governed by the laws of the State of California, USA, without 
 
 ---
 
-Copyright (c) 2026 Peter Bloomingdale.
+Copyright (c) 2026 Generate Biomedicines.

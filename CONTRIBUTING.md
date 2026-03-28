@@ -261,9 +261,9 @@ open http://localhost:5762/__docs__/
 
 ## License
 
-PMxAgent is licensed under `AGPL-3.0-only` (see `LICENSE`).
+PMxAgent is licensed under `AGPL-3.0-only` (see `LICENSE`). Copyright (c) 2026 Generate Biomedicines.
 
-For non-trivial pull requests, contributors must sign the Contributor License Agreement (CLA) before a PR is merged.
+For non-trivial pull requests, contributors must sign the Contributor License Agreement (CLA) before a PR is merged. By signing, contributors assign copyright in their contributions to Generate Biomedicines; Generate Biomedicines grants contributors a perpetual, irrevocable license-back to use their contributions in other projects (see `CONTRIBUTOR_LICENSE_AGREEMENT.md` Section 3).
 - CLA document: `CONTRIBUTOR_LICENSE_AGREEMENT.md`
 - Signing method: Add the following exact statement as a comment on your PR:
   - `I have read the CLA and agree to its terms.`
