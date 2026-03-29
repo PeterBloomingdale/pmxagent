@@ -3,10 +3,14 @@
 
 import json
 import os
+import shutil
 import pytest
 import pytest_asyncio
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
+
+FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 BASE_URL = "http://127.0.0.1:8000/mcp"
 
@@ -28,6 +32,22 @@ def extract_result(call_result) -> dict:
 def is_error_response(result: dict) -> bool:
     """Check if result is an error response."""
     return "error" in result
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_test_fixtures():
+    """Copy test fixture files into ./data/ before the test session runs.
+
+    This ensures files like example_pk_data.csv are always present in the
+    Docker volume even if a developer accidentally deletes them from data/.
+    The source of truth is tests/fixtures/.
+    """
+    os.makedirs(DATA_DIR, exist_ok=True)
+    for filename in os.listdir(FIXTURES_DIR):
+        src = os.path.join(FIXTURES_DIR, filename)
+        dst = os.path.join(DATA_DIR, filename)
+        if os.path.isfile(src) and not os.path.exists(dst):
+            shutil.copy2(src, dst)
 
 
 @pytest_asyncio.fixture(loop_scope="function")

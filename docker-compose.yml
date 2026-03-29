@@ -9,7 +9,7 @@ services:
   rapi:
     build:
       context: .
-      dockerfile: Dockerfile.rapi
+      dockerfile: docker/Dockerfile.rapi
     container_name: pmxagent-rapi
     platform: linux/amd64
     ports:
@@ -55,7 +55,7 @@ services:
   mcp:
     build:
       context: .
-      dockerfile: Dockerfile.mcp
+      dockerfile: docker/Dockerfile.mcp
     container_name: pmxagent-mcp
     platform: linux/amd64
     ports:

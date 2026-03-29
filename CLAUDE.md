@@ -463,7 +463,6 @@ curl -X POST http://localhost:5762/NCA \
 ```
 ├── apis/
 │   ├── rapi.R              # Main router - sources all modules
-│   ├── rapi.R.backup       # Original monolithic file (backup)
 │   ├── endpoints/          # Plumber endpoint handlers
 │   │   ├── nca.R          # NCA endpoint (#* annotations)
 │   │   ├── er.R           # ER endpoint (#* annotations)
@@ -471,7 +470,9 @@ curl -X POST http://localhost:5762/NCA \
 │   │   └── data.R         # DATA endpoint (#* annotations)
 │   ├── models/            # Pure R calculation functions
 │   │   ├── mrgsolve_pk.R  # simulate_1cm(), simulate_2cm()
-│   │   └── er_models.R    # fit_*_model() functions
+│   │   ├── er_models.R    # fit_*_model() functions
+│   │   ├── 1CM.cpp        # mrgsolve 1-compartment model
+│   │   └── 2CM.cpp        # mrgsolve 2-compartment model
 │   ├── utils/             # Shared utilities
 │   │   ├── constants.R    # Configuration constants
 │   │   ├── validation.R   # Input validation functions
@@ -483,19 +484,22 @@ curl -X POST http://localhost:5762/NCA \
 │       ├── test_nca.R     # NCA ground truth validation
 │       └── test_pk_models.R # PK model unit tests
 ├── tests/                  # Python integration tests
-│   └── test_endpoints.py  # MCP client tests
-├── data/                   # Shared data directory (host ↔ container)
-│   └── example_pk_data.csv # Example 3-subject NONMEM-style PK data
-├── examples/               # Usage examples and guides
-│   ├── basic_usage.py     # Python client examples
-│   ├── basic_usage.sh     # Curl examples
-│   ├── cursor_setup.md    # Cursor MCP configuration
-│   └── claude_desktop_setup.md # Claude Desktop configuration
-├── figures/                # Generated plot outputs
+│   ├── conftest.py        # Shared fixtures and helpers
+│   ├── test_endpoints.py  # MCP endpoint tests
+│   ├── test_validation.py # Input validation tests
+│   └── fixtures/          # Test fixture files (auto-copied to data/ before test runs)
+│       └── example_pk_data.csv # Example 3-subject NONMEM-style PK data
+├── data/                   # Bind-mounted into rapi at /data/ — runtime-populated, contents gitignored
+│   └── .gitkeep           # Keeps folder tracked; contents ignored
+├── figures/                # Bind-mounted into rapi at /figures/ — generated plots, contents gitignored
+│   └── .gitkeep           # Keeps folder tracked; contents ignored
+├── docker/                 # Container build files
+│   ├── Dockerfile.rapi    # R API container
+│   ├── Dockerfile.mcp     # Python MCP server container
+│   └── r-packages.txt     # R package install list
+├── CLA.md                  # Contributor License Agreement
 ├── server.py              # FastMCP MCP server entry point
 ├── docker-compose.yml     # Container orchestration
-├── Dockerfile.rapi        # R API container
-├── Dockerfile.mcp         # Python MCP server container
 ├── .dockerignore          # Build context exclusions
 ├── pytest.ini             # Pytest configuration
 ├── requirements-dev.txt   # Test dependencies

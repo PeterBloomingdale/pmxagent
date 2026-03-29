@@ -32,9 +32,12 @@ build/
 htmlcov/
 coverage.xml
 
-# Generated figures
-figures/*.png
-figures/*.pdf
+# Runtime-populated directories — folders are tracked, contents are not
+# Both are bind-mounted into the rapi container at runtime
+figures/*
+!figures/.gitkeep
+data/*
+!data/.gitkeep
 
 # Secrets
 .env

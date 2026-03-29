@@ -7,7 +7,7 @@
 [![R](https://img.shields.io/badge/r-%23276DC3.svg?style=flat&logo=r&logoColor=white)](https://www.r-project.org/)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-49%20passing-brightgreen)](tests/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 ---
 
@@ -288,7 +288,7 @@ Configure via the Claude Desktop config file:
 
 ### ChatGPT
 
-ChatGPT does **not** currently support the MCP protocol. Will update when more information is available.
+ChatGPT now supports MCP via [custom connectors](https://openai.com/). Configuration details are subject to change as the integration matures — refer to the latest OpenAI documentation for setup instructions.
 
 ---
 
@@ -305,8 +305,6 @@ PMxAgent tool names are derived automatically from the first `#*` annotation lin
 | `apis/endpoints/data.R` | `Format data for pharmacometric analyses` | `r_Format_data_for_pharmacometric_analyses` |
 
 Sanitization rule: non-alphanumeric characters → `_`, consecutive underscores collapsed, `r_` prepended. To rename a tool, edit the first `#*` line and rebuild.
-
-For the full pipeline (naming rules, complete per-tool schemas, `@param` best practices, and a step-by-step new endpoint walkthrough), see [`vignettes/tool_naming_and_discovery.qmd`](vignettes/tool_naming_and_discovery.qmd).
 
 ---
 
@@ -453,13 +451,30 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_pk_models.R
 ├── tests/                   # Python integration tests
 │   ├── conftest.py         # Shared fixtures and helpers
 │   ├── test_endpoints.py   # MCP endpoint tests
-│   └── test_validation.py  # Input validation tests
-├── data/                    # Host directory bind-mounted into rapi container at /data/ (rapi only — mcp has no volume mounts)
-│   └── example_pk_data.csv  # Example 3-subject NONMEM-style PK data
+│   ├── test_validation.py  # Input validation tests
+│   └── fixtures/           # Test fixture files (auto-copied to data/ before test runs)
+│       └── example_pk_data.csv  # Example 3-subject NONMEM-style PK data
+├── data/                    # Bind mount → rapi:/data/ at runtime (contents gitignored, folder tracked)
+│   └── .gitkeep
+├── figures/                 # Bind mount → rapi:/figures/ at runtime (contents gitignored, folder tracked)
+│   └── .gitkeep
+├── docker/                  # Container build files
+│   ├── Dockerfile.rapi     # R API container
+│   ├── Dockerfile.mcp      # Python MCP server container
+│   └── r-packages.txt      # R package install list
+├── CLA.md                   # Contributor License Agreement
 ├── server.py               # MCP server entry point
-├── docker-compose.yml      # Container orchestration
-└── figures/                # Host directory bind-mounted into rapi container at /figures/ — generated plots persist here
+└── docker-compose.yml      # Container orchestration
 ```
+
+### About `data/` and `figures/`
+
+Both directories appear empty in the repository — their contents are gitignored. This is intentional:
+
+- **`data/`** is bind-mounted into the `rapi` container at `/data/`. Users drop input files (CSV, Excel) here; the `/DATA` endpoint reads from it. Outputs from the PK→DATA→NCA workflow are also written here at runtime.
+- **`figures/`** is bind-mounted into the `rapi` container at `/figures/`. All generated plots (NCA, ER, PK) are saved here automatically and persist across container restarts on the host filesystem.
+
+Neither directory needs to contain files for the stack to run — Docker creates the bind mount whether or not the directory has content. The `.gitkeep` files ensure the directories exist after a fresh `git clone`.
 
 ---
 
@@ -548,6 +563,23 @@ lsof -i :8000
 
 ---
 
+## 📖 Cite This Work
+
+A manuscript describing PMxAgent is currently in preparation. In the meantime, if you use PMxAgent in your work, please cite the software directly:
+
+```bibtex
+@software{pmxagent,
+  author       = {Bloomingdale, Peter},
+  title        = {PMxAgent: An Agentic Platform for Pharmacometrics},
+  year         = {2026},
+  publisher    = {Generate Biomedicines},
+  url          = {https://github.com/peterbloomingdale/PMxAgent},
+  note         = {Publication pending}
+}
+```
+
+---
+
 ## 🤝 Contributing
 
 Pull requests and issues welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
@@ -561,7 +593,7 @@ For questions, open an issue on GitHub.
 
 ## 📄 License
 
-PMxAgent is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+PMxAgent is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0-only). See [LICENSE](LICENSE) for details.
 
 ---
 

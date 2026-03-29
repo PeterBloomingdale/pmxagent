@@ -1,5 +1,6 @@
 # Citation File Format (CFF) for PMxAgent
 # This file provides metadata for citing PMxAgent in academic publications
+# PLACEHOLDER: Will replace with actual citation information after publication
 # See: https://citation-file-format.github.io/
 
 cff-version: 1.2.0

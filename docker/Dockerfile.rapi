@@ -9,7 +9,7 @@ LABEL description="R Plumber API for pharmacometric functions"
 LABEL version="1.0.0"
 
 # Install required R packages
-COPY r-packages.txt /tmp/r-packages.txt
+COPY docker/r-packages.txt /tmp/r-packages.txt
 RUN R -e "install.packages(scan('/tmp/r-packages.txt', what='character'), repos='https://cloud.r-project.org/')" \
     && rm /tmp/r-packages.txt
 
