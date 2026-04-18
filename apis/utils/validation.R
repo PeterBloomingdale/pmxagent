@@ -158,6 +158,16 @@ normalize_time_unit <- function(time_unit) {
   return(time_unit)
 }
 
+#' Normalize concentration unit string to standard format
+#' @param conc_unit Input concentration unit
+#' @return Normalized concentration unit string
+normalize_conc_unit <- function(conc_unit) {
+  conc_unit <- trimws(conc_unit)
+  mapping <- list("mcg/mL" = "ug/mL", "mcg/ml" = "ug/mL")
+  if (conc_unit %in% names(mapping)) return(mapping[[conc_unit]])
+  return(conc_unit)
+}
+
 # ==================== Enhanced NCA Validation Functions ====================
 
 #' Validate route of administration

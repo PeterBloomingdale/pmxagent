@@ -176,6 +176,32 @@ prepare_adpc <- function(df, col_mapping, metadata) {
     adpc$BLQ <- 0L
   }
 
+  # BLQ substitution with position-specific handling (only when blq_col provided)
+  blq_before_action <- if (!is.null(metadata$blq_before)) metadata$blq_before else "0"
+  blq_after_action  <- if (!is.null(metadata$blq_after))  metadata$blq_after  else "drop"
+  blq_middle_action <- if (!is.null(metadata$blq_middle)) metadata$blq_middle else "drop"
+
+  if (!is.null(blq_col) && blq_col %in% names(df) && any(adpc$BLQ != 0, na.rm = TRUE)) {
+    for (s in unique(adpc$USUBJID)) {
+      s_idx <- which(adpc$USUBJID == s)
+      quant <- s_idx[
+        !is.na(adpc$BLQ[s_idx]) & adpc$BLQ[s_idx] == 0 &
+        !is.na(adpc$AVAL[s_idx]) & adpc$AVAL[s_idx] > 0
+      ]
+      if (length(quant) == 0) next
+
+      first_q  <- min(quant)
+      last_q   <- max(quant)
+      blq_rows <- intersect(which(!is.na(adpc$BLQ) & adpc$BLQ != 0), s_idx)
+
+      for (i in blq_rows) {
+        action <- if (i < first_q) blq_before_action else if (i > last_q) blq_after_action else blq_middle_action
+        adpc$AVAL[i] <- if (action == "0") 0 else NA_real_
+      }
+    }
+    adpc <- adpc[!is.na(adpc$AVAL), ]
+  }
+
   # Sort by subject then time
   adpc <- adpc[order(adpc$USUBJID, adpc$ATPTN), ]
   rownames(adpc) <- NULL

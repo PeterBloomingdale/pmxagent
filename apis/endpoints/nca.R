@@ -66,6 +66,7 @@ function(time = "0,0.25,0.5,1,2,4,8,12,24",
     # ========== Parse and validate basic inputs ==========
     bw_value <- as.numeric(BW)
     time_unit <- normalize_time_unit(time_unit)
+    conc_unit <- normalize_conc_unit(conc_unit)
 
     # Parse numeric parameters
     infusion_dur_val <- if (!is.null(infusion_duration) && nchar(trimws(infusion_duration)) > 0) {
@@ -90,6 +91,7 @@ function(time = "0,0.25,0.5,1,2,4,8,12,24",
 
     # Validate preferred output units if provided
     if (!is.null(conc_unit_out) && nchar(trimws(conc_unit_out)) > 0) {
+      conc_unit_out <- normalize_conc_unit(conc_unit_out)
       validate_preferred_units(conc_unit_out, NULL)
     } else {
       conc_unit_out <- NULL
@@ -466,6 +468,30 @@ run_enhanced_nca <- function(t, c, dose_amt, config) {
 
   # Ensure options are reset on exit
   on.exit(reset_pknca_options())
+
+  # Route-aware pre-dose handling
+
+  # Extravascular: ensure t=0, conc=0 anchor exists so AUC starts at baseline
+  if (config$route == "extravascular" && (length(t) == 0 || min(t) > 0)) {
+    t <- c(0, t)
+    c <- c(0, c)
+  }
+
+  # IV bolus: log-linear C0 back-extrapolation when no t=0 sample was collected
+  if (config$route == "iv_bolus" && length(t) >= 2 && min(t) > 0) {
+    t1 <- t[1]
+    c1 <- c[1]
+    t2 <- t[2]
+    c2 <- c[2]
+    if (c1 > 0 && c2 > 0 && t2 > t1) {
+      slope <- (log(c2) - log(c1)) / (t2 - t1)
+      c0    <- exp(log(c1) - slope * t1)
+      if (is.finite(c0) && c0 > 0) {
+        t <- c(0, t)
+        c <- c(c0, c)
+      }
+    }
+  }
 
   # Create data frame
   df <- data.frame(time = t, conc = c)

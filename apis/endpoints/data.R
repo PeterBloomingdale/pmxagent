@@ -14,6 +14,9 @@
 #* @param conc_col Column name for concentration (default "DV")
 #* @param dose_col Column name for dose (default "AMT"); first non-zero per subject
 #* @param blq_col Column name for BLQ flag (string, optional)
+#* @param blq_before Substitution for BLQ before first quantifiable: "0" (default) or "drop"
+#* @param blq_after Substitution for BLQ after last quantifiable: "drop" (default) or "0"
+#* @param blq_middle Substitution for BLQ between quantifiable samples: "drop" (default) or "0"
 #* @param dose Fallback dose value if dose_col absent or all-zero (default "1")
 #* @param conc_unit Concentration unit label for AVALU column (default "ug/mL")
 #* @param dose_unit Dose unit label for DOSEU column (default "mg")
@@ -28,6 +31,9 @@ function(file_path,
          conc_col      = "DV",
          dose_col      = "AMT",
          blq_col       = "",
+         blq_before    = "0",
+         blq_after     = "drop",
+         blq_middle    = "drop",
          dose          = "1",
          conc_unit     = "ug/mL",
          dose_unit     = "mg",
@@ -35,6 +41,8 @@ function(file_path,
          output_prefix = "") {
 
   tryCatch({
+    conc_unit <- normalize_conc_unit(conc_unit)
+
     # ── 1. Resolve file path ────────────────────────────────────────────────
     data_dir  <- "/data"
     full_path <- file.path(data_dir, file_path)
@@ -77,7 +85,10 @@ function(file_path,
       dose_unit     = dose_unit,
       route         = route,
       dosno         = 1,
-      fallback_dose = as.numeric(dose)
+      fallback_dose = as.numeric(dose),
+      blq_before    = blq_before,
+      blq_after     = blq_after,
+      blq_middle    = blq_middle
     )
 
     # ── 5. Process: route to appropriate processor ──────────────────────────

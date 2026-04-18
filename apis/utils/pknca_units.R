@@ -193,12 +193,9 @@ set_pknca_options <- function(auc_method = "lin up/log down",
   # For simplicity, use the middle value as the primary BLQ handling approach
   # since middle BLQ values are most commonly the concern in NCA
 
-  # Convert "zero" to numeric 0 for PKNCA
-  blq_value <- blq_middle
-  if (blq_value == "zero") {
-    blq_value <- 0
-  }
-  PKNCA.options(conc.blq = blq_value)
+  # BLQ substitution is handled by the DATA endpoint before data reaches NCA.
+  # Tell PKNCA to keep any remaining zeros rather than silently discarding them.
+  PKNCA.options(conc.blq = "keep")
 
   return(invisible(NULL))
 }
