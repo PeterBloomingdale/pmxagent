@@ -76,7 +76,8 @@ create_nca_intervals <- function(t, dosing_scenario, tau = NULL, params = NULL, 
 
   # Base parameters always calculated
   base_params <- c("cmax", "tmax", "auclast", "half.life", "lambda.z",
-                   "aucinf.obs", "cl.obs", "vz.obs", "r.squared", "adj.r.squared")
+                   "aucinf.obs", "cl.obs", "vz.obs", "r.squared", "adj.r.squared",
+                   "lambda.z.n.points")
 
   # Add route-specific parameters
   if (route %in% c("iv_bolus", "intravascular")) {
@@ -88,6 +89,10 @@ create_nca_intervals <- function(t, dosing_scenario, tau = NULL, params = NULL, 
   # Add additional requested parameters
   if (!is.null(params) && nchar(trimws(params)) > 0) {
     extra_params <- trimws(unlist(strsplit(params, ",")))
+    # Normalise extravascular aliases: cl.f.obs -> cl.obs, vz.f.obs -> vz.obs, etc.
+    # PKNCA computes these under the .obs/.pred names regardless of route.
+    extra_params <- gsub("^cl\\.f\\.", "cl.", extra_params)
+    extra_params <- gsub("^vz\\.f\\.", "vz.", extra_params)
     base_params <- unique(c(base_params, extra_params))
   }
 
@@ -166,9 +171,9 @@ set_pknca_options <- function(auc_method = "lin up/log down",
                                min_hl_r_squared = 0.9,
                                max_aucinf_pext = 20,
                                first_tmax = TRUE,
-                               blq_first = "keep",
+                               blq_first = "zero",
                                blq_middle = "drop",
-                               blq_last = "keep") {
+                               blq_last = "drop") {
 
   # Set AUC calculation method
   PKNCA.options(auc.method = auc_method)
@@ -183,19 +188,20 @@ set_pknca_options <- function(auc_method = "lin up/log down",
   # Set Tmax tie-breaking behavior
   PKNCA.options(first.tmax = first_tmax)
 
-  # Set BLQ handling
-
-  # PKNCA conc.blq accepts a single value for all positions:
-  # - "keep" - keep BLQ values as is
-  # - "drop" - remove BLQ values
-  # - numeric - replace BLQ with this value (e.g., 0)
-  # Position-based handling requires preprocessing with clean.conc.blq()
-  # For simplicity, use the middle value as the primary BLQ handling approach
-  # since middle BLQ values are most commonly the concern in NCA
-
-  # BLQ substitution is handled by the DATA endpoint before data reaches NCA.
-  # Tell PKNCA to keep any remaining zeros rather than silently discarding them.
-  PKNCA.options(conc.blq = "keep")
+  # Set position-specific BLQ handling. PKNCA's conc.blq natively accepts a list with
+  # first/middle/last keys; each value may be "keep", "drop", or a number (e.g. 0).
+  # Positions are defined relative to the measurable concentrations:
+  #   first  - BLQ before the first measurable conc (leading / ~ before Tmax)
+  #   middle - BLQ embedded between measurable concs
+  #   last   - BLQ after the last measurable conc (trailing / after Tmax)
+  # The defaults (first = 0, middle/last = drop) match Phoenix WinNonlin and PKanalix:
+  # zero before Tmax, excluded/missing after Tmax (and embedded excluded, per Phoenix).
+  map_blq <- function(v) if (identical(v, "zero")) 0 else v  # "keep"/"drop" pass through
+  PKNCA.options(conc.blq = list(
+    first  = map_blq(blq_first),
+    middle = map_blq(blq_middle),
+    last   = map_blq(blq_last)
+  ))
 
   return(invisible(NULL))
 }
@@ -209,10 +215,44 @@ reset_pknca_options <- function() {
     min.hl.r.squared = 0.9,
     max.aucinf.pext = 20,
     first.tmax = TRUE,
-    conc.blq = "drop"
+    conc.blq = list(first = 0, middle = "drop", last = "drop")
   )
   return(invisible(NULL))
 }
+
+#' Restrict PKNCA's terminal-slope (lambda_z) selection to DECLINING windows.
+#'
+#' PKNCA's automated half-life selection (pk.calc.half.life) chooses the candidate
+#' terminal window whose adjusted R-squared is within `adj.r.squared.factor` of the
+#' MAXIMUM adjusted R-squared taken over ALL windows -- including non-declining ones.
+#' On noisy individual profiles a short non-declining window (e.g. an upward residual
+#' blip at the tail) can have the best fit and veto every genuinely declining window,
+#' yielding NA. Phoenix WinNonlin ("Best Fit"/ARS) and PKanalix instead select the
+#' best-adjusted-R-squared window AMONG DECLINING spans. This patch makes PKNCA match
+#' that behavior by restricting the max to windows with lambda.z > 0.
+#'
+#' Implemented as a minimal, version-guarded runtime patch of the single offending
+#' expression. `pk.nca` resolves the half-life function by name
+#' (get.interval.cols()[["half.life"]]$FUN == "pk.calc.half.life"), so replacing the
+#' binding in the PKNCA namespace takes effect for the whole pipeline.
+#' @return invisible(TRUE); errors if the target expression is not found
+.patch_pknca_halflife_declining_only <- function() {
+  fn  <- PKNCA::pk.calc.half.life
+  src <- deparse(body(fn), width.cutoff = 500L)
+  target <- "max(half_lives_for_selection$adj.r.squared, na.rm = TRUE)"
+  repl   <- "max(half_lives_for_selection$adj.r.squared[half_lives_for_selection$lambda.z > 0], -Inf, na.rm = TRUE)"
+  if (!any(grepl(target, src, fixed = TRUE))) {
+    stop("PKNCA half-life patch target not found (PKNCA version changed); review pk.calc.half.life")
+  }
+  src <- gsub(target, repl, src, fixed = TRUE)
+  body(fn) <- parse(text = paste(src, collapse = "\n"))[[1]]
+  assignInNamespace("pk.calc.half.life", fn, ns = "PKNCA")
+  invisible(TRUE)
+}
+
+# Apply the declining-only lambda_z selection patch once at startup (PKNCA is loaded
+# by rapi.R before this file is sourced).
+.patch_pknca_halflife_declining_only()
 
 #' Extract results from PKNCA result object with units
 #' @param pknca_result Result from pk.nca()
@@ -288,14 +328,14 @@ derive_param_unit <- function(param, time_unit, conc_unit, dose_unit) {
     return(paste0(time_unit, "^2*", conc_unit))
   }
 
-  # Clearance parameters (volume/time)
+  # Clearance parameters: dose_unit / (time_unit * conc_unit)
   if (grepl("^cl", param)) {
-    return(paste0("mL/", time_unit))
+    return(paste0(dose_unit, "/(", time_unit, "*", conc_unit, ")"))
   }
 
-  # Volume parameters
+  # Volume parameters: dose_unit / conc_unit
   if (grepl("^v[sz]", param) || grepl("^vss", param) || grepl("^vd", param)) {
-    return("mL")
+    return(paste0(dose_unit, "/", conc_unit))
   }
 
   # Percent extrapolation

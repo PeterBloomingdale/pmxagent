@@ -8,10 +8,36 @@ LABEL maintainer="PMxAgent Team"
 LABEL description="R Plumber API for pharmacometric functions"
 LABEL version="1.0.0"
 
+# System dependencies for the nlmixr2 stack used by /LIBRARY:
+# rxode2 compiles ODE models (build-essential/gfortran); symengine vendors its C++
+# library and needs cmake + gmp + mpfr.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake \
+        build-essential \
+        gfortran \
+        libgmp-dev \
+        libmpfr-dev \
+        pkg-config \
+        libxml2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install required R packages
 COPY docker/r-packages.txt /tmp/r-packages.txt
 RUN R -e "install.packages(scan('/tmp/r-packages.txt', what='character'), repos='https://cloud.r-project.org/')" \
     && rm /tmp/r-packages.txt
+
+# Install the nlmixr2 simulation stack for the /LIBRARY endpoint.
+# Use the image's default repositories (Posit Package Manager binaries) instead of
+# forcing source builds, since rxode2/nlmixr2est/symengine are heavy to compile.
+# qs2 is required to read nlmixr2lib's modeldb.qs2 catalog (it is a Suggests dep).
+RUN R -e "install.packages(c('remotes', 'rxode2', 'nlmixr2est', 'qs2'))"
+
+# nlmixr2lib model library, pinned to a specific commit so the simulated 'ground truth'
+# datasets stay reproducible (CRAN lags far behind the GitHub source). Bump deliberately.
+ARG NLMIXR2LIB_SHA=d8a40f2649e1f1493163915ed206dbec654aaf67
+RUN R -e "remotes::install_github('nlmixr2/nlmixr2lib', ref = '${NLMIXR2LIB_SHA}', upgrade = 'never')"
+# Surface the pinned commit to the running API (reported by the /LIBRARY endpoint)
+ENV NLMIXR2LIB_SHA=${NLMIXR2LIB_SHA}
 
 # Create figures directory with proper permissions
 RUN mkdir -p /figures && chmod 777 /figures

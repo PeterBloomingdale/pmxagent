@@ -20,8 +20,10 @@ source("utils/pknca_units.R")
 source("utils/colors.R")
 source("utils/plotting.R")
 source("utils/data_processing.R")
+source("utils/library_utils.R")
 source("models/mrgsolve_pk.R")
 source("models/er_models.R")
+source("models/nlmixr2lib_sim.R")  # attaches nlmixr2lib + rxode2
 
 # Initialize mrgsolve models at startup
 initialize_pk_models()
@@ -59,17 +61,19 @@ function(pr) {
   })
 
   # Load endpoint routers (dependencies already loaded above)
-  nca_router  <- plumb("endpoints/nca.R")
-  er_router   <- plumb("endpoints/er.R")
-  pk_router   <- plumb("endpoints/pk.R")
-  data_router <- plumb("endpoints/data.R")
+  nca_router     <- plumb("endpoints/nca.R")
+  er_router      <- plumb("endpoints/er.R")
+  pk_router      <- plumb("endpoints/pk.R")
+  data_router    <- plumb("endpoints/data.R")
+  library_router <- plumb("endpoints/library.R")
 
   # Copy routes from each sub-router to main router
-  # This preserves the original paths (/NCA, /ER, /PK, /DATA) and OpenAPI metadata
+  # This preserves the original paths (/NCA, /ER, /PK, /DATA, /LIBRARY) and OpenAPI metadata
   pr <- copy_routes(pr, nca_router)
   pr <- copy_routes(pr, er_router)
   pr <- copy_routes(pr, pk_router)
   pr <- copy_routes(pr, data_router)
+  pr <- copy_routes(pr, library_router)
 
   pr
 }

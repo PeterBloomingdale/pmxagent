@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Overview
 
 PMxAgent transforms validated R pharmacometric workflows into AI-ready HTTP APIs. The architecture consists of:
-- **R Plumber API** (modular structure in `apis/`): Pharmacometric endpoints (NCA, ER, PK, DATA)
+- **R Plumber API** (modular structure in `apis/`): Pharmacometric endpoints (NCA, ER, PK, DATA, LIBRARY)
   - `apis/rapi.R` - Lightweight router using `copy_routes()` helper to compose endpoint modules
   - `apis/endpoints/` - Self-contained endpoint modules with Plumber annotations and dependencies
   - `apis/models/` - Core pharmacometric calculation functions
@@ -103,9 +103,11 @@ curl -X POST http://localhost:5762/PK \
   - `nca.R` - Non-compartmental analysis endpoint (uses PKNCA)
   - `er.R` - Exposure-response modeling endpoint (uses ggplot2, er_models)
   - `pk.R` - PK simulation endpoint (uses ggplot2, pk_models)
+  - `library.R` - Model library list/simulate endpoint (uses nlmixr2lib, rxode2)
 - **Models** (`apis/models/*.R`): Pure R functions for calculations
   - `mrgsolve_pk.R` - mrgsolve-based 1CM and 2CM model simulations (simulate_1cm(), simulate_2cm())
   - `er_models.R` - Linear, Emax, Imax, logit model fitting
+  - `nlmixr2lib_sim.R` - nlmixr2lib catalog access + faithful rxode2 population simulation (load_library_model(), probe_model(), simulate_library_population())
 - **Utilities** (`apis/utils/*.R`): Shared functions and constants
   - `validation.R` - Input validation and error checking (includes route, dosing scenario, BLQ, business rules validators)
   - `plotting.R` - Standardized plot generation and saving
@@ -113,6 +115,7 @@ curl -X POST http://localhost:5762/PK \
   - `units.R` - Unit label derivation and formatting for NCA parameters (`derive_nca_unit()` forwards to `derive_param_unit()`; `calculate_effective_dose()` for mg/kg; `format_value_unit()` and `format_nca_results_with_units()` for response formatting)
   - `pknca_units.R` - PKNCA route mapping (`map_route_to_pknca()`), interval creation (`create_nca_intervals()`), options management (`set_pknca_options()`/`reset_pknca_options()`), unit label derivation (`derive_param_unit()`), result extraction (`extract_results_with_units()`). Note: `create_pknca_units()` is defined but not called by the NCA endpoint
   - `colors.R` - Color scheme utilities for consistent plotting
+  - `library_utils.R` - /LIBRARY sampling-design helpers (`assign_tier()`, `build_sampling_schedule()`, `fit_terminal_half_life()`) and catalog filtering (`filter_pk_models()`)
 - **Tests** (`apis/tests/*.R`): R unit tests for model functions
   - `test_nca.R` - Ground truth validation for NCA
   - `test_pk_models.R` - Unit tests for compartment models
@@ -148,7 +151,10 @@ Comprehensive NCA endpoint leveraging PKNCA's native features including route of
   - `BW` - Body weight in kg (default "70"); required when `dose_unit="mg/kg"`
 
 **Route of Administration**:
-- `route` - `"iv_bolus"`, `"iv_infusion"`, or `"extravascular"` (default)
+- `route` - `"iv_bolus"`, `"iv_infusion"`, or `"extravascular"` (default). Also accepts the **numeric
+  administration codes** `1`=iv_bolus, `2`=extravascular, `3`=iv_infusion (e.g. datasets prepared for
+  PKanalix); `normalize_route()` maps them to the canonical strings. Applies to both the `route`
+  parameter and the per-row `ROUTE` column in a `data_file`.
 - `infusion_duration` - Duration in time_unit (required when `route="iv_infusion"`)
 
 **Dosing Scenario**:
@@ -172,9 +178,17 @@ Comprehensive NCA endpoint leveraging PKNCA's native features including route of
 - `time_unit_out` - Preferred output time unit label
 
 **File-based input (from /DATA endpoint)**:
-- `data_file` - ADPC CSV filename in /data (output from /DATA endpoint); when provided, reads time/conc/dose/subject_id from file, overrides time/conc/dose string params (string, optional, default "")
+- `data_file` - ADPC CSV filename in /data (output from /DATA or /LIBRARY endpoints); when provided, reads time/conc/dose/subject_id from file, overrides time/conc/dose string params (string, optional, default "")
   - When `data_file` is set, the response includes `"source_file": "<filename>"` and runs in population mode automatically
   - The ADPC file must have columns: USUBJID, ATPTN, AVAL, DOSE (standard /DATA output)
+  - **Multi-drug grouping**: an optional `DRUG` column lets one file hold many drugs. `ROUTE` and
+    `AVALU` are then read **per subject**, so a single dataset can mix routes (IV + extravascular) and
+    concentration units across drugs. `ROUTE` may be string or the numeric codes `1`/`2`/`3` (per row).
+    The response gains `n_drugs` and a `summary_by_drug` block (mean±SD Cmax/Tmax/auclast/half-life per
+    drug with that drug's route/units), and each `individual_results` entry is tagged with `drug` +
+    `route`. This is the `/LIBRARY` `mode=benchmark` → `/NCA` workflow. Note `DRUG` and `USUBJID` are
+    independent (USUBJID delimits each profile, DRUG is the grouping label) — they need not match.
+    Without a `DRUG` column, behavior is unchanged (single route, `summary_by_dose` only).
 
 - **Multi-subject mode**: Use pipe (`|`) separator between subjects for time, conc, dose
 - **Returns**: All parameters include value/unit pairs with analysis settings:
@@ -417,6 +431,139 @@ curl -X POST http://localhost:5762/NCA \
 - Wrong column: `"Column 'CONC' not found. Available: ID, TIME, DV, AMT. Use conc_col parameter to specify the correct column name."`
 - Unsupported type: `"Unsupported dataset_type 'nonmem_pk'. Supported in v1: 'adpc'. PopPK support coming in v2."`
 
+### POST /LIBRARY (Model Library — list, simulate & benchmark)
+Wraps the **`nlmixr2lib`** literature model library to (a) list available human PK models, (b)
+simulate concentration-time profiles from a named model, and (c) **benchmark** — simulate *many*
+models into a single multi-drug ADPC CSV. All emit ADPC-compatible CSV(s) that feed the `/NCA`
+`data_file` workflow directly. `nlmixr2lib` is installed from GitHub **pinned to a commit SHA** (see
+`docker/Dockerfile.rapi`, `NLMIXR2LIB_SHA`) so simulated "ground truth" datasets stay reproducible
+(CRAN lags far behind). Depends on `rxode2` + `nlmixr2est` (+ `qs2`); these compile native ODE code, so
+`Dockerfile.rapi` adds `cmake`/`gmp`/`mpfr` system deps.
+
+- **Required**: `mode` — `"list"` (default), `"simulate"`, or `"benchmark"`.
+- **Simulate params**:
+  - `model_name` — model name from the library (required for simulate; discover via `mode=list`)
+  - `dose` — dose amount(s) in mg, comma-separated for multiple dose groups (default `"100"`)
+  - `n_subjects` — population size (default `"20"`)
+  - `seed` — random seed (default `"42"`)
+  - `conc_unit` / `dose_unit` — unit **labels** for output/AVALU/DOSEU (default `"ug/mL"` / `"mg"`)
+  - `time_unit` — plot display unit: auto/hours/days/weeks (default `"auto"`)
+  - `covariates` — overrides for models that require covariates, e.g. `"WT=70,CRCL=90"` (default `""`)
+  - `route_override` — force iv_bolus/iv_infusion/extravascular (default `""`, auto-detected)
+  - `times_override` — custom comma-separated sampling times in hours (default `""`)
+  - `save_csv` — write the ADPC CSV (default `"true"`); `output_dir` (default `/data`), `figure_dir` (default `/figures`)
+- **List params**: `category_filter` — optional substring filter on model category.
+- **Benchmark params** (`mode="benchmark"`): generate **one combined multi-drug ADPC CSV** (with a
+  `DRUG` grouping column) for NCA benchmarking:
+  - `models` — `"all"`/`"auto"` (clean deduplicated set via `select_benchmark_models()`) or an explicit
+    comma-separated list (default `"all"`)
+  - `output_profile` — `"mean"` (one representative profile/drug, default), `"individual"` (N patients),
+    or `"both"`
+  - `mean_type` — `"geometric"` (default; `exp(mean(log Cc))` per timepoint), `"arithmetic"`, or
+    `"typical"` (deterministic eta=0 profile)
+  - `scope` — `"standard"` (default, linear 1–2CM only; excludes TMDD, nonlinear, 3-compartment) or
+    `"wide"` (casts a broader net: includes TMDD, Michaelis-Menten/nonlinear elimination, 3-compartment
+    models, and PK-PD coupled models — any model where a PK concentration profile `Cc` can be simulated).
+    Endogenous-baseline and non-eliminating models are excluded in both scopes (no clean NCA terminal phase).
+  - `output_file` — fixed output CSV filename (default `""` → timestamped); `append` — `"true"` to
+    merge/resume into an existing file (default `"false"`)
+  - `route_format` — `ROUTE` column encoding in the CSV: `"string"` (default, `iv_bolus`/`extravascular`)
+    or `"numeric"` (`1`=iv_bolus, `2`=extravascular, `3`=iv_infusion, e.g. for PKanalix). `/NCA` accepts
+    either encoding.
+  - reuses `dose`, `n_subjects`, `seed`, `dose_unit`, `output_dir`. Each model gets a deterministic seed
+    (`base_seed + stable_index`) so output is identical regardless of how a run is chunked.
+  - **Column identity**: `USUBJID` = full model reference (e.g. `Li_2006_meropenem`), `DRUG` = drug name
+    (e.g. `meropenem`, via `library_drug_name()`; generic `PK_*` templates kept as-is). Stripping the
+    `Author_Year_` prefix preserves all 151 drugs as unique; the full reference in `USUBJID` keeps each
+    profile traceable to its source model.
+
+**How simulate works** (`apis/models/nlmixr2lib_sim.R`, `apis/utils/library_utils.R`):
+1. `modellib(name)` returns a model **function**; `rxode2::rxode2()` compiles it to an rxUi (exposing
+   `$omega` = published BSV, `$allCovs` = required covariates).
+2. Terminal half-life is estimated **numerically** from a typical-value (eta=0) probe simulation
+   (`probe_model()` → `fit_terminal_half_life()`) — structure-agnostic, not by parsing theta names.
+3. `assign_tier()` + `build_sampling_schedule()` derive a half-life-scaled sampling grid
+   (early absolute points + log-spaced multiples out to ~5×t½).
+4. `simulate_library_population()` runs `rxSolve(nSub=N, omega=<published>, params=<ref covariates>)`,
+   reads the BSV-only concentration variable **`Cc`** (never the residual-bearing `sim`), and returns
+   a long data frame. **BSV-only** ground truth (no residual error added). Reproducible: `rxSetSeed()` + `cores=1`.
+5. The endpoint writes the standard ADPC columns (`USUBJID, ATPTN, AVAL, AVALU, DOSE, DOSEU, DOSNO,
+   ROUTE, BLQ`) so `/NCA` ingests the CSV directly.
+
+**How benchmark works** (`library_benchmark_mode()` + `.library_simulate_core()` in
+`apis/endpoints/library.R`): resolves the model list, then per model (inside a `tryCatch` so one
+failure never aborts the batch) reuses the simulate stack, normalizes **time to hours** via
+`extract_model_units()` + `time_to_hours_factor()`, collapses the N-subject population to one
+geometric-mean profile, tags rows with `DRUG`/`ROUTE`/native `AVALU`, and accumulates into one CSV.
+The `ROUTE` is assigned **empirically from the simulated profile** (`empirical_route()`): the eta=0
+profile's Tmax decides it — a peak at the dose → `iv_bolus`; a profile that starts ~0 and rises to a
+later peak (absorption / lag) → `extravascular` — so the route always matches the data (and is robust to
+the rxode2 dose-time pre-dose-0 artifact for fast IV drugs). The dose itself goes into the structural
+compartment from `detect_route()` (depot when present, else central); `route_override` forces both.
+Post-compile guards keep it clean: models compiling to `>2` disposition compartments, with an implausible
+terminal half-life (`> LIBRARY_MAX_HALF_LIFE_H = 4380 h`, endogenous-baseline / non-eliminating), an
+endogenous baseline, or nonlinear (dose-disproportionate) elimination are skipped and reported in the
+manifest `failures[]`.
+
+**Catalog filtering** (`filter_pk_models()`): primary include = catalog `DV == "Cc"` (concentration
+output = PK); then drops, with a per-row `exclude_reason`: `algebraic` (MBMA/cellular-kinetic/disease
+models flagged in the catalog `algebraic` column), `gt_2cmt` / `gt_2cmt_desc` (3-compartment by name
+**or description**), `tmdd`, `multi_analyte` (ADC), `indirect_response` (indirect-response PD
+templates), `non_human` (rat/mouse/sheep/… by name or filename), `combination` (multi-drug names), and
+`null_route` (no dosing info). Route is read from the catalog `dosing` column (depot present →
+extravascular). `select_benchmark_models()` then restricts to `iv_bolus`/`extravascular` and
+deduplicates to one model per drug (latest publication `year`; literature models collapse on the first
+drug token, generics keep their full stem).
+
+**Covariates**: literature models often require covariates (e.g. WT, CRCL, AGE). Resolution order:
+user `covariates=` → reference adult defaults in `LIBRARY_REF_COVARIATES` (reported as
+`covariates_defaulted`) → categorical/indicator covariates matching `LIBRARY_CATEGORICAL_COV_PATTERN`
+default to **0 = the reference category** (reported as `covariates_zeroed`). A required *continuous*
+covariate with no default raises an actionable error (the model is skipped in benchmark mode).
+
+**Units caveat**: concentration numeric values stay in the model's **native** units, carried per drug
+in the `AVALU` column (label only, no numeric conversion). **Time IS normalized to hours** in
+simulate/benchmark output using each model's native time unit (e.g. day→×24, minute→×1/60), so `ATPTN`
+and reported half-lives are in hours and comparable across drugs.
+
+**Returns** (simulate): `model_info` (route, n_compartments, conc_output_var, terminal_half_life,
+tier), `simulation_settings` (doses, sampling_times_h, observation_window_h, bsv_source,
+covariates_applied/defaulted, seed), `parameters` (typical CL/Vc/Q/Vp/Ka), `summary_stats` per dose
+group (mean±SD profile, Cmax/Tmax), `output_files` (`csv` filename in /data, `plot` path in /figures).
+**Returns** (list): `n_models`, `models[]` (name, category, route, n_compartments, description),
+`excluded_count`, `excluded_reasons`, `pinned_commit`.
+**Returns** (benchmark): `n_models_included`, `n_failed`, `n_drugs`, `n_rows`, `output_files.csv`,
+`failures[]` (name + error), and a per-model `manifest[]` (route, n_compartments, native_time_unit,
+terminal_half_life_h, tier, AVALU, n_cov_defaulted/zeroed, bsv_source).
+
+**MCP tool name**: `r_Model_library_simulate_or_list` (mapped in `server.py` `ENDPOINT_TOOL_NAMES`).
+
+**Example calls**:
+```bash
+# List available PK models
+curl -X POST http://localhost:5762/LIBRARY -d 'mode=list'
+
+# Simulate an IV 2-compartment literature model (published BSV + reference covariates)
+curl -X POST http://localhost:5762/LIBRARY \
+  -d 'mode=simulate' -d 'model_name=Li_2006_meropenem' \
+  -d 'dose=500,1000' -d 'n_subjects=20' -d 'seed=42'
+
+# Build the standard NCA benchmark dataset (linear 1-2CM only, ~130-150 models).
+curl -X POST http://localhost:5762/LIBRARY \
+  -d 'mode=benchmark' -d 'models=all' -d 'output_profile=mean' -d 'mean_type=geometric' \
+  -d 'n_subjects=50' -d 'seed=42' -d 'output_file=nca_benchmark.csv'
+
+# Build the wide NCA benchmark dataset (includes TMDD, nonlinear, 3CM; scope=wide).
+# Run against the R API directly (not MCP) to avoid client timeout; may take longer than standard.
+curl -X POST http://localhost:5762/LIBRARY \
+  -d 'mode=benchmark' -d 'scope=wide' -d 'models=all' -d 'output_profile=mean' \
+  -d 'mean_type=geometric' -d 'n_subjects=50' -d 'seed=42' \
+  -d 'output_file=nca_benchmark_wide.csv'
+
+# Analyze ALL drugs at once (groups by DRUG, per-drug route/units) -> summary_by_drug
+curl -X POST http://localhost:5762/NCA -d 'data_file=nca_benchmark.csv'
+```
+
 ## Code Conventions
 
 ### R API Structure
@@ -467,10 +614,12 @@ curl -X POST http://localhost:5762/NCA \
 │   │   ├── nca.R          # NCA endpoint (#* annotations)
 │   │   ├── er.R           # ER endpoint (#* annotations)
 │   │   ├── pk.R           # PK endpoint (#* annotations)
-│   │   └── data.R         # DATA endpoint (#* annotations)
+│   │   ├── data.R         # DATA endpoint (#* annotations)
+│   │   └── library.R      # LIBRARY endpoint (#* annotations)
 │   ├── models/            # Pure R calculation functions
 │   │   ├── mrgsolve_pk.R  # simulate_1cm(), simulate_2cm()
 │   │   ├── er_models.R    # fit_*_model() functions
+│   │   ├── nlmixr2lib_sim.R # nlmixr2lib load + rxode2 population simulation
 │   │   ├── 1CM.cpp        # mrgsolve 1-compartment model
 │   │   └── 2CM.cpp        # mrgsolve 2-compartment model
 │   ├── utils/             # Shared utilities
@@ -479,13 +628,16 @@ curl -X POST http://localhost:5762/NCA \
 │   │   ├── units.R        # NCA unit derivation and formatting
 │   │   ├── colors.R       # Color scheme utilities
 │   │   ├── plotting.R     # Plot utilities
-│   │   └── data_processing.R # Data reading, cleaning, ADPC standardization
+│   │   ├── data_processing.R # Data reading, cleaning, ADPC standardization
+│   │   └── library_utils.R # Tier/schedule + catalog filtering for /LIBRARY
 │   └── tests/             # R unit tests
 │       ├── test_nca.R     # NCA ground truth validation
-│       └── test_pk_models.R # PK model unit tests
+│       ├── test_pk_models.R # PK model unit tests
+│       └── test_library_models.R # /LIBRARY pure-helper unit tests
 ├── tests/                  # Python integration tests
 │   ├── conftest.py        # Shared fixtures and helpers
 │   ├── test_endpoints.py  # MCP endpoint tests
+│   ├── test_library_endpoint.py # /LIBRARY integration tests
 │   ├── test_validation.py # Input validation tests
 │   └── fixtures/          # Test fixture files (auto-copied to data/ before test runs)
 │       └── example_pk_data.csv # Example 3-subject NONMEM-style PK data

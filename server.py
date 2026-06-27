@@ -26,10 +26,11 @@ from pydantic import AnyHttpUrl
 # Descriptive tool names for better AI agent understanding
 # Maps R API paths to human-readable MCP tool names
 ENDPOINT_TOOL_NAMES = {
-    "/NCA":  "Noncompartmental_analysis_NCA",
-    "/ER":   "Exposure_response_ER_analysis",
-    "/PK":   "Pharmacokinetic_simulation_IV_1_or_2_CM",
-    "/DATA": "Format_data_for_pharmacometric_analyses",
+    "/NCA":     "Noncompartmental_analysis_NCA",
+    "/ER":      "Exposure_response_ER_analysis",
+    "/PK":      "Pharmacokinetic_simulation_IV_1_or_2_CM",
+    "/DATA":    "Format_data_for_pharmacometric_analyses",
+    "/LIBRARY": "Model_library_simulate_or_list",
 }
 
 # Configure structured logging
@@ -286,8 +287,13 @@ def mount_plumber_api(timeout: float = 30.0) -> None:
             base_url = f"{u.scheme}://{u.hostname}:{u.port or 80}"
             log.debug(f"  Base URL: {base_url}")
 
-            # Create async HTTP client for R API
-            r_client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+            # Create async HTTP client for R API.
+            # Read timeout is 900s: mode=benchmark scope=wide runs ~185 models (~10 min).
+            # mode=simulate compiles rxode2 ODE on first use; mode=list is fast.
+            r_client = httpx.AsyncClient(
+                base_url=base_url,
+                timeout=httpx.Timeout(connect=10.0, read=900.0, write=30.0, pool=10.0),
+            )
 
             # Build mcp_names mapping from operationIds in spec
             mcp_names = {}

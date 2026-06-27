@@ -43,7 +43,7 @@ RESPONSE_PROB <- list(
 
 # Security limits
 MAX_DATA_POINTS <- 10000
-MAX_SUBJECTS <- 1000  # Maximum number of subjects for multi-subject endpoints
+MAX_SUBJECTS <- 5000  # Maximum number of subjects for multi-subject endpoints
 
 # NCA Unit Settings
 DEFAULT_DOSE_UNIT <- "mg"           # Dose unit for NCA
@@ -87,10 +87,12 @@ PKNCA_EXPOSURE_PARAMS <- c(
 )
 
 # Clearance and volume parameters
+# cl.f.obs / vz.f.obs are accepted aliases for extravascular apparent CL/F and Vz/F;
+# they are normalised to cl.obs / vz.obs before being passed to PKNCA.
 PKNCA_CL_V_PARAMS <- c(
-  "cl.last", "cl.obs", "cl.pred",
-
-"vz.obs", "vz.pred", "vss.obs", "vss.pred", "vd.last"
+  "cl.last", "cl.obs", "cl.pred", "cl.f.obs", "cl.f.pred",
+  "vz.obs", "vz.pred", "vss.obs", "vss.pred", "vd.last",
+  "vz.f.obs", "vz.f.pred"
 )
 
 # Half-life quality metrics
@@ -150,14 +152,14 @@ NCA_UNIT_RULES <- list(
   "mrt.iv.last" = function(tu, cu, du) tu,
   "mrt.md.last" = function(tu, cu, du) tu,
 
-  # Clearance (volume/time) - dose/(time*conc) simplifies to volume/time
-  "cl.obs" = function(tu, cu, du) paste0("mL/", tu),
-  "cl.pred" = function(tu, cu, du) paste0("mL/", tu),
-  "cl.last" = function(tu, cu, du) paste0("mL/", tu),
+  # Clearance: dose_unit / (time_unit * conc_unit) — no simplification, units faithfully reflect inputs
+  "cl.obs" = function(tu, cu, du) paste0(du, "/(", tu, "*", cu, ")"),
+  "cl.pred" = function(tu, cu, du) paste0(du, "/(", tu, "*", cu, ")"),
+  "cl.last" = function(tu, cu, du) paste0(du, "/(", tu, "*", cu, ")"),
 
-  # Volume of distribution (volume) - dose/conc simplifies to volume
-  "vz.obs" = function(tu, cu, du) "mL",
-  "vz.pred" = function(tu, cu, du) "mL",
-  "vss.obs" = function(tu, cu, du) "mL",
-  "vss.last" = function(tu, cu, du) "mL"
+  # Volume of distribution: dose_unit / conc_unit
+  "vz.obs" = function(tu, cu, du) paste0(du, "/", cu),
+  "vz.pred" = function(tu, cu, du) paste0(du, "/", cu),
+  "vss.obs" = function(tu, cu, du) paste0(du, "/", cu),
+  "vss.last" = function(tu, cu, du) paste0(du, "/", cu)
 )
