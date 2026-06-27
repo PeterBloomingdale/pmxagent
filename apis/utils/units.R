@@ -53,9 +53,11 @@ derive_nca_unit <- function(param_code, time_unit, conc_unit, dose_unit) {
 
 #' Format a value with its unit as a list
 #' @param value Numeric value
-#' @param unit Unit string
-#' @return List with value and unit components
+#' @param unit Unit string (NULL or NA for dimensionless parameters)
+#' @return List with value and unit components (unit = NULL renders as JSON null)
 format_value_unit <- function(value, unit) {
+  # Coerce NULL to NA so jsonlite serializes as JSON null, not {}
+  if (is.null(unit)) unit <- NA_character_
   list(
     value = value,
     unit = unit

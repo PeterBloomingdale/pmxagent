@@ -168,6 +168,21 @@ normalize_conc_unit <- function(conc_unit) {
   return(conc_unit)
 }
 
+#' Normalize a route of administration to the canonical string form.
+#' Accepts the canonical strings as-is and the numeric administration codes
+#' 1 = iv_bolus, 2 = extravascular, 3 = iv_infusion (as number or string, e.g.
+#' from a dataset prepared for PKanalix). Unrecognized values are returned
+#' unchanged so validate_route() still reports them as invalid.
+#' @param route Route string or numeric code
+#' @return Normalized route string
+normalize_route <- function(route) {
+  if (is.null(route) || length(route) == 0) return(route)
+  r <- trimws(as.character(route))
+  mapping <- list("1" = "iv_bolus", "2" = "extravascular", "3" = "iv_infusion")
+  if (r %in% names(mapping)) return(mapping[[r]])
+  return(r)
+}
+
 # ==================== Enhanced NCA Validation Functions ====================
 
 #' Validate route of administration

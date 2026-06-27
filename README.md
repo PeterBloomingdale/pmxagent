@@ -134,7 +134,7 @@ curl http://localhost:5762/openapi.json  # Should return JSON
 
 ## 🎯 What Can PMxAgent Do?
 
-PMxAgent provides four core pharmacometric endpoints accessible via HTTP API:
+PMxAgent provides five core pharmacometric endpoints accessible via HTTP API:
 
 | Endpoint | Purpose | Key Features |
 |----------|---------|--------------|
@@ -142,6 +142,7 @@ PMxAgent provides four core pharmacometric endpoints accessible via HTTP API:
 | `POST /ER` | Exposure-response modeling | Auto-select best model by AIC; gold-standard two-panel visualization |
 | `POST /PK` | PK simulation | 1- or 2-compartment IV; population mode with between-subject variability; optional CSV output |
 | `POST /DATA` | Data formatting | Reads raw CSV/Excel from `/data/` (host directory bind-mounted into the R API container); standardizes to CDISC ADPC format; saves output for downstream NCA |
+| `POST /LIBRARY` | Model library | List or simulate from the `nlmixr2lib` literature model library; faithful rxode2 population PK with published between-subject variability; outputs ADPC CSV that feeds `/NCA` directly |
 
 ### Data Formatting Guide
 
@@ -232,6 +233,43 @@ PK parameters (CL, V1, V2, Q) are accepted as **per-kg values** and scaled by `B
 #### `/ER` — Display Labels Only
 
 The `auc_unit` parameter (default `"h*ug/mL"`) is used solely as an axis label on the exposure-response plot. No unit validation or numeric conversion is performed. Response values are treated as unitless.
+
+---
+
+## 📊 NCA Benchmark Datasets
+
+The `Benchmark/` directory contains two reproducible, literature-grounded datasets for benchmarking
+NCA tools (PMxAgent, ChatGPT, Phoenix WinNonlin/PKanalix). Both are generated from the `nlmixr2lib`
+model library (pinned commit `d8a40f2649e1f1493163915ed206dbec654aaf67`) via the `/LIBRARY` endpoint.
+
+| | **v1 — Standard** | **v2 — Wide** |
+|---|---|---|
+| Scope | Linear, 1–2 compartment only | + nonlinear, TMDD, 3-compartment |
+| Drugs | 151 | 185 |
+| Rows | 2,553 | 3,126 |
+| C-t file | `Benchmark/nca_benchmark.csv` | `Benchmark/nca_benchmark_wide.csv` |
+| Manifest | `Benchmark/nca_benchmark_manifest.csv` | `Benchmark/nca_benchmark_wide_manifest.csv` |
+
+Both datasets use geometric-mean profiles of 50 simulated subjects per drug with published
+between-subject variability. `ROUTE` is encoded numerically (1=IV bolus, 2=extravascular) and
+assigned empirically from each drug's simulated profile.
+
+**Run NCA on a benchmark dataset:**
+```bash
+# v1 — standard (all linear 1-2CM drugs)
+curl -X POST http://localhost:5762/NCA -d 'data_file=nca_benchmark.csv'
+
+# v2 — wide (includes nonlinear, TMDD, 3-compartment)
+curl -X POST http://localhost:5762/NCA -d 'data_file=nca_benchmark_wide.csv'
+```
+
+**Regenerate the wide benchmark** (5–10 min; updates the CSV in `data/` and manifest in `Benchmark/`):
+```bash
+python3 Benchmark/generate_wide_benchmark.py
+```
+
+See [`Benchmark/BENCHMARK_DATASET_README.md`](Benchmark/BENCHMARK_DATASET_README.md) for full
+methodology, caveats, and manifest column descriptions.
 
 ---
 
@@ -454,6 +492,11 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_pk_models.R
 │   ├── test_validation.py  # Input validation tests
 │   └── fixtures/           # Test fixture files (auto-copied to data/ before test runs)
 │       └── example_pk_data.csv  # Example 3-subject NONMEM-style PK data
+├── Benchmark/               # NCA benchmark datasets and generation scripts
+│   ├── BENCHMARK_DATASET_README.md  # Full methodology and caveats
+│   ├── nca_benchmark_manifest.csv   # v1 per-drug provenance (200 rows)
+│   ├── nca_benchmark_wide_manifest.csv  # v2 per-drug provenance (218 rows)
+│   └── generate_wide_benchmark.py   # Reproducible wide benchmark generator
 ├── data/                    # Bind mount → rapi:/data/ at runtime (contents gitignored, folder tracked)
 │   └── .gitkeep
 ├── figures/                 # Bind mount → rapi:/figures/ at runtime (contents gitignored, folder tracked)
