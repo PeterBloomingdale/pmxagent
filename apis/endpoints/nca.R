@@ -491,6 +491,7 @@ run_population_nca <- function(time, conc, dose, subject_id, dose_label, config,
       dose_label = dose_labels[i],
       conc_unit = subj_out_conc,
       time_unit = output_time,
+      dose_unit = subj_config$dose_unit,
       Cmax      = cmax_val,
       Tmax      = tmax_val,
       auclast   = auclast_val,
@@ -505,7 +506,10 @@ run_population_nca <- function(time, conc, dose, subject_id, dose_label, config,
     results_df <- rbind(results_df, subj_row)
   }
 
-  # Calculate summary by dose group with units
+  # Calculate summary by dose group with units. CL/Vz labels come from the same
+  # derivation as individual_results so the two blocks always agree.
+  cl_unit <- derive_param_unit("cl.obs", output_time, output_conc, config$dose_unit)
+  vz_unit <- derive_param_unit("vz.obs", output_time, output_conc, config$dose_unit)
   unique_doses <- unique(dose_labels)
   summary_by_dose <- lapply(unique_doses, function(dl) {
     idx <- results_df$dose_label == dl
@@ -522,10 +526,10 @@ run_population_nca <- function(time, conc, dose, subject_id, dose_label, config,
       aucinf_obs_sd  = format_value_unit(sd(results_df$aucinf_obs[idx],  na.rm = TRUE), paste0(output_time, "*", output_conc)),
       half_life_mean = format_value_unit(mean(results_df$half_life[idx], na.rm = TRUE), output_time),
       half_life_sd   = format_value_unit(sd(results_df$half_life[idx],   na.rm = TRUE), output_time),
-      cl_obs_mean    = format_value_unit(mean(results_df$cl_obs[idx],    na.rm = TRUE), paste0("mL/", output_time)),
-      cl_obs_sd      = format_value_unit(sd(results_df$cl_obs[idx],      na.rm = TRUE), paste0("mL/", output_time)),
-      vz_obs_mean    = format_value_unit(mean(results_df$vz_obs[idx],    na.rm = TRUE), "mL"),
-      vz_obs_sd      = format_value_unit(sd(results_df$vz_obs[idx],      na.rm = TRUE), "mL"),
+      cl_obs_mean    = format_value_unit(mean(results_df$cl_obs[idx],    na.rm = TRUE), cl_unit),
+      cl_obs_sd      = format_value_unit(sd(results_df$cl_obs[idx],      na.rm = TRUE), cl_unit),
+      vz_obs_mean    = format_value_unit(mean(results_df$vz_obs[idx],    na.rm = TRUE), vz_unit),
+      vz_obs_sd      = format_value_unit(sd(results_df$vz_obs[idx],      na.rm = TRUE), vz_unit),
       adj_r_sq_mean  = mean(results_df$adj_r_sq[idx],  na.rm = TRUE),
       n_points_mean  = round(mean(results_df$n_points[idx], na.rm = TRUE), 1)
     )
@@ -541,6 +545,9 @@ run_population_nca <- function(time, conc, dose, subject_id, dose_label, config,
       idx  <- results_df$drug == dg
       cu   <- results_df$conc_unit[idx][1]
       tu   <- results_df$time_unit[idx][1]
+      du   <- results_df$dose_unit[idx][1]
+      cl_u <- derive_param_unit("cl.obs", tu, cu, du)
+      vz_u <- derive_param_unit("vz.obs", tu, cu, du)
       list(
         drug = dg,
         n = sum(idx),
@@ -555,10 +562,10 @@ run_population_nca <- function(time, conc, dose, subject_id, dose_label, config,
         aucinf_obs_sd  = format_value_unit(sd(results_df$aucinf_obs[idx],  na.rm = TRUE), paste0(tu, "*", cu)),
         half_life_mean = format_value_unit(mean(results_df$half_life[idx], na.rm = TRUE), tu),
         half_life_sd   = format_value_unit(sd(results_df$half_life[idx],   na.rm = TRUE), tu),
-        cl_obs_mean    = format_value_unit(mean(results_df$cl_obs[idx],    na.rm = TRUE), paste0("mL/", tu)),
-        cl_obs_sd      = format_value_unit(sd(results_df$cl_obs[idx],      na.rm = TRUE), paste0("mL/", tu)),
-        vz_obs_mean    = format_value_unit(mean(results_df$vz_obs[idx],    na.rm = TRUE), "mL"),
-        vz_obs_sd      = format_value_unit(sd(results_df$vz_obs[idx],      na.rm = TRUE), "mL"),
+        cl_obs_mean    = format_value_unit(mean(results_df$cl_obs[idx],    na.rm = TRUE), cl_u),
+        cl_obs_sd      = format_value_unit(sd(results_df$cl_obs[idx],      na.rm = TRUE), cl_u),
+        vz_obs_mean    = format_value_unit(mean(results_df$vz_obs[idx],    na.rm = TRUE), vz_u),
+        vz_obs_sd      = format_value_unit(sd(results_df$vz_obs[idx],      na.rm = TRUE), vz_u),
         adj_r_sq_mean  = mean(results_df$adj_r_sq[idx],  na.rm = TRUE),
         n_points_mean  = round(mean(results_df$n_points[idx], na.rm = TRUE), 1)
       )

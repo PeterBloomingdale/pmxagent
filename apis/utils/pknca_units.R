@@ -292,6 +292,21 @@ extract_results_with_units <- function(pknca_result, time_unit, conc_unit, dose_
   return(results)
 }
 
+#' Volume unit for dose/conc, only when the reduction is exact.
+#' ug/mL and mg/L are numerically identical, so mg/(mg/L) = L exactly. Every other
+#' supported concentration unit either lands on an unreadable scale (ng/mL -> 1e3 L)
+#' or needs a molecular weight (umol/L, nmol/L), so those keep the composite label.
+#' @param dose_unit Dose unit ("mg", or "mg/kg" which is converted to an effective mg dose)
+#' @param conc_unit Concentration unit
+#' @return "L", or NA_character_ when no exact reduction exists
+reduce_dose_conc_to_volume <- function(dose_unit, conc_unit) {
+  du <- tolower(trimws(if (is.null(dose_unit)) "" else dose_unit))
+  if (identical(du, "mg/kg")) du <- "mg"
+  cu <- sub("^mcg/", "ug/", tolower(trimws(if (is.null(conc_unit)) "" else conc_unit)))
+  if (identical(du, "mg") && cu %in% c("ug/ml", "mg/l")) return("L")
+  NA_character_
+}
+
 #' Derive unit for a parameter based on parameter type
 #' Fallback when PKNCA units not available
 #' @param param Parameter code
@@ -301,6 +316,7 @@ extract_results_with_units <- function(pknca_result, time_unit, conc_unit, dose_
 #' @return Unit string
 derive_param_unit <- function(param, time_unit, conc_unit, dose_unit) {
   param <- tolower(param)
+  vol_unit <- reduce_dose_conc_to_volume(dose_unit, conc_unit)
 
   # Concentration parameters
   if (param %in% c("cmax", "cmin", "clast.obs", "c0", "cav", "ctrough")) {
@@ -328,13 +344,15 @@ derive_param_unit <- function(param, time_unit, conc_unit, dose_unit) {
     return(paste0(time_unit, "^2*", conc_unit))
   }
 
-  # Clearance parameters: dose_unit / (time_unit * conc_unit)
+  # Clearance parameters: dose_unit / (time_unit * conc_unit), reduced when exact
   if (grepl("^cl", param)) {
+    if (!is.na(vol_unit)) return(paste0(vol_unit, "/", time_unit))
     return(paste0(dose_unit, "/(", time_unit, "*", conc_unit, ")"))
   }
 
-  # Volume parameters: dose_unit / conc_unit
+  # Volume parameters: dose_unit / conc_unit, reduced when exact
   if (grepl("^v[sz]", param) || grepl("^vss", param) || grepl("^vd", param)) {
+    if (!is.na(vol_unit)) return(vol_unit)
     return(paste0(dose_unit, "/", conc_unit))
   }
 
