@@ -40,12 +40,6 @@ derive_nca_unit <- function(param_code, time_unit, conc_unit, dose_unit) {
   if (grepl("lambda", param_code)) {
     return(paste0("1/", time_unit))
   }
-  if (grepl("^cl", param_code)) {
-    return(paste0("mL/", time_unit))
-  }
-  if (grepl("^v[sz]", param_code) || grepl("^vss", param_code)) {
-    return("mL")
-  }
 
   # Unknown parameter - return NA
   return(NA_character_)
