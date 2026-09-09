@@ -78,7 +78,7 @@ docker compose up --build -d
 
 **Verify it's up:**
 ```bash
-docker compose ps                         # two containers, healthy/running
+docker compose ps                         # two containers, both healthy
 curl http://localhost:5762/openapi.json   # returns JSON
 ```
 
@@ -109,6 +109,11 @@ Full parameters, unit handling, and end-to-end workflows are documented in the *
 ## 🤖 Connect an AI Agent
 
 PMxAgent exposes its tools over MCP at `http://localhost:8000/mcp`. On first connection, clients complete a one-time OAuth approval in the browser.
+
+> **Protocol:** PMxAgent serves MCP `2026-07-28` (the stateless revision) and only that revision.
+> Current clients negotiate it automatically. A client still on the older handshake protocol is
+> refused with JSON-RPC `-32022`; set `MCP_ALLOW_LEGACY=true` in `docker-compose.yml` and restart
+> to re-admit it.
 
 **Claude Code** — a `.mcp.json` is included in the repo root and is picked up automatically when you run `claude` from the project directory. Approve the OAuth prompt on first connect.
 
@@ -159,6 +164,7 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_library_models.R
 - **R changes not showing up?** Rebuild — `docker compose down && docker compose up --build`. A plain `restart` won't pick up code changes.
 - **Port already in use?** Check with `lsof -i :8000` and `lsof -i :5762`, then free the port or change it in `docker-compose.yml`.
 - **Agent can't connect?** Confirm the MCP URL is `http://localhost:8000/mcp` (not `/messages`), and approve the OAuth prompt on first connection. Tokens refresh automatically on reconnect.
+- **Agent rejected with `-32022`?** Its MCP client is on the older handshake protocol; PMxAgent serves `2026-07-28` only. Either update the client, or set `MCP_ALLOW_LEGACY=true` in `docker-compose.yml` and `docker compose up -d mcp`.
 
 ---
 
