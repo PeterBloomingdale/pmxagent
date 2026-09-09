@@ -1,5 +1,11 @@
 # requirements.txt - for docker build
-fastmcp>=3.0.0
-httpx
-python-dotenv
-uvloop
+#
+# Compatible-range pins. The previous floor (fastmcp>=3.0.0, unbounded) let a major
+# version land silently on a rebuild; the upper bounds make that a deliberate change.
+fastmcp>=4.0.3,<5
+httpx2>=2.12,<3
+
+# Not imported directly, but active by effect: uvicorn auto-selects uvloop when
+# present, and pydantic-settings uses python-dotenv to read .env files.
+python-dotenv>=1.2,<2
+uvloop>=0.22,<1
