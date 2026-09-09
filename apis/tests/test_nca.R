@@ -8,11 +8,12 @@
 
 library(PKNCA)
 
-# Source dependencies for unit tests
-source("utils/constants.R")
-source("utils/validation.R")
-source("utils/units.R")
-source("utils/pknca_units.R")
+# Source dependencies for unit tests. Absolute paths: the container's working
+# directory is / , so relative paths do not resolve.
+source("/home/rstudio/apis/utils/constants.R")
+source("/home/rstudio/apis/utils/validation.R")
+source("/home/rstudio/apis/utils/units.R")
+source("/home/rstudio/apis/utils/pknca_units.R")
 
 cat("===== Enhanced NCA Endpoint Unit Tests =====\n\n")
 
@@ -161,15 +162,29 @@ stopifnot(derive_param_unit("lambda.z", "h", "ug/mL", "mg") == "1/h")
 stopifnot(derive_param_unit("lambda.z", "min", "ug/mL", "mg") == "1/min")
 cat("  OK Rate constant parameters get 1/time_unit\n")
 
-# Test clearance parameters
-stopifnot(derive_param_unit("cl.obs", "h", "ug/mL", "mg") == "mL/h")
-stopifnot(derive_param_unit("cl.pred", "min", "ug/mL", "mg") == "mL/min")
-cat("  OK Clearance parameters get mL/time_unit\n")
+# Test clearance parameters - ug/mL and mg/L reduce exactly to L (ug/mL == mg/L)
+stopifnot(derive_param_unit("cl.obs", "h", "ug/mL", "mg") == "L/h")
+stopifnot(derive_param_unit("cl.pred", "min", "ug/mL", "mg") == "L/min")
+stopifnot(derive_param_unit("cl.obs", "h", "mg/L", "mg") == "L/h")
+cat("  OK Clearance parameters reduce to L/time_unit\n")
 
 # Test volume parameters
-stopifnot(derive_param_unit("vz.obs", "h", "ug/mL", "mg") == "mL")
-stopifnot(derive_param_unit("vss.obs", "h", "ug/mL", "mg") == "mL")
-cat("  OK Volume parameters get mL\n")
+stopifnot(derive_param_unit("vz.obs", "h", "ug/mL", "mg") == "L")
+stopifnot(derive_param_unit("vss.obs", "h", "ug/mL", "mg") == "L")
+cat("  OK Volume parameters reduce to L\n")
+
+# mg/kg is converted to an effective mg dose before PKNCA, so it reduces too
+stopifnot(derive_param_unit("cl.obs", "h", "ug/mL", "mg/kg") == "L/h")
+stopifnot(derive_param_unit("vz.obs", "h", "ug/mL", "mg/kg") == "L")
+cat("  OK mg/kg dosing reduces like mg\n")
+
+# Concentration units with no exact reduction keep the composite label
+stopifnot(derive_param_unit("cl.obs", "h", "ng/mL", "mg") == "mg/(h*ng/mL)")
+stopifnot(derive_param_unit("vz.obs", "h", "ng/mL", "mg") == "mg/ng/mL")
+stopifnot(derive_param_unit("vz.obs", "h", "g/L", "mg") == "mg/g/L")
+stopifnot(derive_param_unit("cl.obs", "h", "umol/L", "mg") == "mg/(h*umol/L)")
+stopifnot(derive_param_unit("vz.obs", "h", "nmol/L", "mg") == "mg/nmol/L")
+cat("  OK Non-reducible concentration units keep the composite label\n")
 
 # Test percent extrapolation
 stopifnot(derive_param_unit("pext.obs", "h", "ug/mL", "mg") == "%")

@@ -213,8 +213,8 @@ Comprehensive NCA endpoint leveraging PKNCA's native features including route of
     "results": {
       "cmax": {"value": 10.0, "unit": "ug/mL"},
       "lambda.z": {"value": 0.1, "unit": "1/h"},
-      "cl.obs": {"value": 1000, "unit": "mL/h"},
-      "vz.obs": {"value": 10000, "unit": "mL"},
+      "cl.obs": {"value": 1.0, "unit": "L/h"},
+      "vz.obs": {"value": 10.0, "unit": "L"},
       "r.squared": {"value": 0.995, "unit": null},
       "pext.obs": {"value": 15.0, "unit": "%"}
     }
@@ -233,10 +233,19 @@ Comprehensive NCA endpoint leveraging PKNCA's native features including route of
 | AUC | `time_unit*conc_unit` | h*ug/mL |
 | half_life | `time_unit` | h |
 | lambda_z | `1/time_unit` | 1/h |
-| CL | `mL/time_unit` | mL/h |
-| Vz | `mL` | mL |
+| CL | `L/time_unit` when the reduction is exact, else `dose_unit/(time_unit*conc_unit)` | L/h (ug/mL); mg/(h*ng/mL) (ng/mL) |
+| Vz | `L` when the reduction is exact, else `dose_unit/conc_unit` | L (ug/mL); mg/ng/mL (ng/mL) |
 | pext | `%` | % |
 | r.squared | (dimensionless) | null |
+
+**CL / Vz exact reduction**: `reduce_dose_conc_to_volume()` (`pknca_units.R`) simplifies the
+composite label to litres **only when the reduction is exact** — a mg dose with `ug/mL` or `mg/L`
+concentrations, since `ug/mL` is numerically identical to `mg/L` and mg/(mg/L) = L. `mg/kg` counts
+as mg (the effective dose is converted before PKNCA). Every other concentration unit keeps the
+composite: `ng/mL` would land on 10³ L, `g/L` on mL, and `umol/L`/`nmol/L` cannot reduce without a
+molecular weight. **No numeric conversion is performed in either case** — a CL of 0.216 labelled
+`L/h` is the same number that was previously mislabelled `mL/h`. `individual_results` and
+`summary_by_dose`/`summary_by_drug` both derive from this one function, so their labels always agree.
 
 **Note**: `create_pknca_units()` in `pknca_units.R` is defined but not called by the NCA endpoint — PKNCA's native unit conversion is not used.
 
