@@ -78,9 +78,17 @@ services:
       LOG_LEVEL: "INFO"
       MCP_BASE_URL: http://localhost:8000
       MCP_TEST_TOKEN: "pmxagent-ci-token"
+      # No outbound pypi.org call on every container start.
+      FASTMCP_CHECK_FOR_UPDATES: "off"
+      # ASCII banner is noise in container logs.
+      FASTMCP_SHOW_SERVER_BANNER: "false"
+      # FASTMCP_TELEMETRY_MODE is intentionally left at its default ("native"):
+      # it is OpenTelemetry API instrumentation only, a no-op unless an OTel SDK
+      # and exporter are configured, and it implements the 2026-07-28 spec's
+      # trace-context propagation through request _meta. Nothing is sent off-box.
 
-    # Note: No health check for mcp - FastMCP only serves SSE endpoint
-    # Container health is monitored by Docker based on process status
+    # Note: health check added once the server went stateless - see Dockerfile.mcp.
+    # server/discover needs no session, so a single POST is a valid liveness probe.
 
     # Service dependency
     depends_on:

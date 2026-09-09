@@ -1,7 +1,8 @@
 # ---------- Dockerfile.rapi (R Plumber API) ----------
-# Use latest stable version
-# Note: Pin to specific version tag after verifying in production
-FROM rstudio/plumber:latest
+# Pinned by tag AND digest for reproducible builds: an unpinned `:latest` lets R
+# itself change under the rxode2 / mrgsolve compile chain on any rebuild.
+# v1.3.0 and latest resolve to the same digest as of 2026-09-08 (R 4.6.1).
+FROM rstudio/plumber:v1.3.0@sha256:6ff2260d8c52cb1f22ee6298328b57bd082fa18883c79b1c258d0e0a164096cf
 
 # Image metadata
 LABEL maintainer="PMxAgent Team"
