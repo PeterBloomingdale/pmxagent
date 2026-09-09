@@ -7,14 +7,16 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
 title: "PMxAgent: An Agentic Platform for Pharmacometrics"
-version: 0.1.0
-date-released: 2026-01-07
+version: 1.1.0
+date-released: 2026-09-09
 abstract: |
   PMxAgent is an open-source framework that transforms validated R pharmacometric
   workflows into AI-ready HTTP APIs using Docker containerization and the Model
-  Context Protocol (MCP). It provides three core pharmacometric endpoints:
-  non-compartmental analysis (NCA), exposure-response (ER) modeling, and
-  pharmacokinetic (PK) simulation. PMxAgent enables AI agents like Cursor and
+  Context Protocol (MCP). It provides five pharmacometric endpoints:
+  non-compartmental analysis (NCA), exposure-response (ER) modeling,
+  pharmacokinetic (PK) simulation, data standardization to CDISC ADaM ADPC
+  format (DATA), and a literature model library for simulation and
+  benchmarking (LIBRARY). PMxAgent enables AI agents like Cursor and
   Claude Code to discover and use pharmacometric tools automatically, bridging
   the gap between trusted R analytics and modern AI-driven automation systems.
 
@@ -74,8 +76,8 @@ references:
 
   - type: software
     title: "FastMCP: Fast Model Context Protocol Implementation"
-    year: 2024
-    url: "https://github.com/jlowin/fastmcp"
+    year: 2026
+    url: "https://github.com/PrefectHQ/fastmcp"
 
   - type: software
     title: "Plumber: An API Generator for R"
@@ -92,11 +94,11 @@ references:
 #   title = {{PMxAgent: Bridging R Pharmacometric Workflows with AI Agents via Model Context Protocol}},
 #   year = {2026},
 #   url = {https://github.com/peterbloomingdale/PMxAgent},
-#   version = {0.1.0},
+#   version = {1.1.0},
 #   license = {AGPL-3.0-only}
 # }
 
 # APA format:
 # Bloomingdale, P. (2026). PMxAgent: Bridging R Pharmacometric Workflows with
-# AI Agents via Model Context Protocol (Version 0.1.0) [Computer software].
+# AI Agents via Model Context Protocol (Version 1.1.0) [Computer software].
 # https://github.com/peterbloomingdale/PMxAgent
