@@ -10,7 +10,7 @@ import secrets
 import traceback
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 from fastmcp import FastMCP
 from fastmcp.server.auth import OAuthProvider, AccessToken
 from mcp.server.auth.provider import (
@@ -43,7 +43,7 @@ logging.basicConfig(
 log = logging.getLogger("pmxagent.server")
 
 # Quiet noisy third-party loggers
-logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpx2").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("uvicorn").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
@@ -272,7 +272,7 @@ def mount_plumber_api(timeout: float = 30.0) -> None:
         attempt += 1
         try:
             log.debug(f"Attempt {attempt}: Fetching OpenAPI spec from {spec_url}")
-            spec = httpx.get(spec_url, timeout=2).json()
+            spec = httpx2.get(spec_url, timeout=2).json()
 
             # Extract API metadata
             api_title = spec.get('info', {}).get('title', 'Unknown API')
@@ -290,9 +290,9 @@ def mount_plumber_api(timeout: float = 30.0) -> None:
             # Create async HTTP client for R API.
             # Read timeout is 900s: mode=benchmark scope=wide runs ~185 models (~10 min).
             # mode=simulate compiles rxode2 ODE on first use; mode=list is fast.
-            r_client = httpx.AsyncClient(
+            r_client = httpx2.AsyncClient(
                 base_url=base_url,
-                timeout=httpx.Timeout(connect=10.0, read=900.0, write=30.0, pool=10.0),
+                timeout=httpx2.Timeout(connect=10.0, read=900.0, write=30.0, pool=10.0),
             )
 
             # Build mcp_names mapping from operationIds in spec
@@ -326,7 +326,7 @@ def mount_plumber_api(timeout: float = 30.0) -> None:
 
             return  # Success!
 
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             last_err = exc
             log.warning(f"Attempt {attempt}: HTTP error connecting to R API: {exc.__class__.__name__}: {exc}")
         except ValueError as exc:
