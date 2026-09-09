@@ -5,6 +5,13 @@ pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 
-# MCP client for integration tests
-fastmcp>=3.0.0
-httpx>=0.24.0
+# MCP client for integration tests.
+# Must track the server's fastmcp major version (requirements.txt): a client on a
+# different major silently negotiates a different MCP protocol revision, so the
+# tests would exercise a transport the server no longer uses in production.
+fastmcp>=4.0.3,<5
+
+# Imported directly by tests/test_mcp_protocol.py, which drives the wire protocol
+# rather than going through the fastmcp Client. Declared explicitly rather than
+# relied on as a transitive dependency of fastmcp.
+httpx2>=2.12,<3

@@ -54,7 +54,7 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_pk_models.R
 - R API (Plumber): http://localhost:5762
 - API Documentation (Swagger UI): http://localhost:5762/__docs__/
 - Python MCP Server: http://localhost:8000
-- MCP SSE endpoint: http://localhost:8000/messages
+- MCP endpoint (streamable HTTP): http://localhost:8000/mcp
 
 ### Testing Endpoints
 ```bash
@@ -93,7 +93,7 @@ curl -X POST http://localhost:5762/PK \
 3. **mcp** container starts after rapi is healthy
 4. `server.py` fetches OpenAPI spec from `http://rapi:8000/openapi.json`
 5. FastMCP dynamically mounts R API tools using the OpenAPI spec
-6. MCP server exposes tools on port 8000 via SSE transport at `/messages`
+6. MCP server exposes tools on port 8000 via streamable HTTP at `/mcp`
 
 ### Key Components
 
@@ -127,8 +127,38 @@ curl -X POST http://localhost:5762/PK \
 **Python MCP Server (`server.py`)**
 - Uses `FastMCP.from_openapi()` to auto-generate MCP tools from R API
 - 30-second retry loop with 2-second intervals for R API availability
-- SSE transport for MCP communication
+- Streamable HTTP transport at `/mcp`, stateless (SSE is deprecated as of MCP 2026-07-28)
 - Base URL parsing from RAPI_OPENAPI_URL environment variable
+
+**MCP protocol revision**
+
+The server implements **MCP `2026-07-28`** (the stateless revision) and **only** that revision.
+There is no `initialize` handshake and no `Mcp-Session-Id`: every request carries its protocol
+version and client capabilities in `_meta`, and `server/discover` advertises server identity and
+capabilities.
+
+- **Modern-only enforcement**: `ModernProtocolOnlyMiddleware` (`server.py`) refuses requests to
+  `/mcp` whose `MCP-Protocol-Version` header is absent or is a handshake-era version, replying
+  with JSON-RPC `-32022`. OAuth routes (`/.well-known/*`, `/register`, `/authorize`, `/token`,
+  `/revoke`) are deliberately **not** gated - they carry no such header, and gating them would
+  break authentication for every client.
+- **Escape hatch**: set `MCP_ALLOW_LEGACY=true` (declared in `docker-compose.yml`) to re-admit
+  handshake clients. Restart only, no rebuild.
+- **Cache hints**: `cache_ttl=300` / `cache_scope="private"` on the `FastMCP` constructor, so
+  every cacheable result (`tools/list`, `server/discover`, ...) carries `ttlMs: 300000`. Without
+  them the wire value is `ttlMs: 0`, which tells clients not to cache at all.
+- **Stateless**: `mcp.run(..., stateless_http=True)` - nothing is pinned to a connection, so the
+  server can sit behind a plain round-robin load balancer.
+- **Version range (not an exact pin)**: `fastmcp>=4.0.3,<5` in **both** `requirements.txt` and
+  `requirements-dev.txt` - patches and minors are picked up automatically, only a major bump
+  requires an edit. The client major must match the server's or the tests negotiate a different
+  protocol revision than production uses. FastMCP 4 requires `httpx2`, not `httpx`. The only
+  exact pin in the repo is the R base image digest in `docker/Dockerfile.rapi`.
+- **Health check**: the `mcp` container probes with a `server/discover` POST (possible only
+  because the protocol is stateless - no handshake to complete). The probe is unauthenticated so
+  it cannot expect a 200; it asserts `100 <= status < 500`, which separates "alive and handling
+  requests" from both "failing everything with 5xx" and "not listening at all" (curl reports
+  `000` when it cannot connect).
 
 ### Volume Mounts
 - `./figures:/figures` - Persistent storage for generated plots across container restarts

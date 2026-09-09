@@ -10,7 +10,7 @@ import secrets
 import traceback
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 from fastmcp import FastMCP
 from fastmcp.server.auth import OAuthProvider, AccessToken
 from mcp.server.auth.provider import (
@@ -21,7 +21,11 @@ from mcp.server.auth.provider import (
 )
 from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOptions
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp_types import UNSUPPORTED_PROTOCOL_VERSION
+from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_PROTOCOL_VERSION
 from pydantic import AnyHttpUrl
+from starlette.middleware import Middleware
+from starlette.responses import JSONResponse
 
 # Descriptive tool names for better AI agent understanding
 # Maps R API paths to human-readable MCP tool names
@@ -43,7 +47,7 @@ logging.basicConfig(
 log = logging.getLogger("pmxagent.server")
 
 # Quiet noisy third-party loggers
-logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpx2").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("uvicorn").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
@@ -62,6 +66,24 @@ logging.getLogger("fakeredis").setLevel(logging.WARNING)
 _MCP_TEST_TOKEN = os.getenv("MCP_TEST_TOKEN", "")
 _MCP_BASE_URL = os.getenv("MCP_BASE_URL", "http://localhost:8000")
 
+# Path the MCP protocol is served on. Module-level so the protocol middleware and
+# the run() call cannot disagree about which requests are MCP traffic.
+_MCP_PATH = "/mcp"
+
+# Escape hatch: re-admit handshake-era clients without a code change or rebuild.
+# Set MCP_ALLOW_LEGACY=true in the environment if a client cannot yet negotiate
+# the 2026-07-28 protocol.
+_ALLOW_LEGACY = os.getenv("MCP_ALLOW_LEGACY", "").strip().lower() in ("1", "true", "yes")
+
+# Cache hint applied to every cacheable result (tools/list, prompts/list,
+# resources/list, resources/templates/list, resources/read, server/discover).
+# The tool catalogue is fixed once mount_plumber_api() returns, so a few minutes
+# of client-side caching is safe. "private" because every response sits behind a
+# per-client OAuth token - "public" would let a shared intermediary serve one
+# client's tool list to another.
+_CACHE_TTL_SECONDS = 300
+_CACHE_SCOPE = "private"
+
 
 class LocalOAuthProvider(OAuthProvider):
     """
@@ -69,7 +91,7 @@ class LocalOAuthProvider(OAuthProvider):
 
     Automatically approves all authorization requests without user confirmation,
     making it seamless for local MCP clients like Claude Code. Serves the full
-    OAuth 2.0/2.1 discovery endpoints required by the MCP 2025-11-05 HTTP spec:
+    OAuth 2.0/2.1 discovery endpoints required by the MCP 2026-07-28 HTTP spec:
       - /.well-known/oauth-authorization-server
       - /.well-known/oauth-protected-resource
       - POST /register  (dynamic client registration)
@@ -142,7 +164,13 @@ class LocalOAuthProvider(OAuthProvider):
             resource=params.resource,
         )
         log.debug("Auto-approved authorization for client: %s", client.client_id)
-        return construct_redirect_uri(str(params.redirect_uri), code=code, state=params.state)
+        # `iss` per RFC 9207, required by the 2026-07-28 authorization rules: clients
+        # MUST validate a present iss against the recorded issuer before redeeming the
+        # code, which defends against mix-up attacks when a client talks to several
+        # authorization servers.
+        return construct_redirect_uri(
+            str(params.redirect_uri), code=code, state=params.state, iss=_MCP_BASE_URL
+        )
 
     async def load_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: str
@@ -239,10 +267,74 @@ class LocalOAuthProvider(OAuthProvider):
             self._refresh.pop(token.token, None)
 
 
+# ──────────────────── Modern-protocol-only enforcement ──────────────────────
+
+class ModernProtocolOnlyMiddleware:
+    """Reject handshake-era MCP requests, serving only the 2026-07-28 protocol.
+
+    The SDK routes on the MCP-Protocol-Version header: anything that is not a
+    handshake version reaches the modern stateless entry point, while a handshake
+    version (or a missing header) falls through to the legacy session path. Both
+    remain reachable by default, so closing off the old protocol is a policy this
+    server applies rather than a switch the SDK provides.
+
+    Only MCP traffic is gated. The OAuth endpoints (/.well-known/*, /register,
+    /authorize, /token, /revoke) are ordinary HTTP and carry no MCP-Protocol-Version
+    header, so gating them would break authentication for every client.
+    """
+
+    def __init__(self, app, mcp_path: str = _MCP_PATH) -> None:
+        self.app = app
+        self.mcp_path = mcp_path
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or not scope.get("path", "").startswith(self.mcp_path):
+            await self.app(scope, receive, send)
+            return
+
+        header = b"mcp-protocol-version"
+        version = next(
+            (v.decode("latin-1") for k, v in scope["headers"] if k.lower() == header), None
+        )
+
+        if version is None or version in HANDSHAKE_PROTOCOL_VERSIONS:
+            log.warning(
+                "Rejected legacy MCP request: protocol version %s (server requires %s). "
+                "Set MCP_ALLOW_LEGACY=true to re-admit handshake clients.",
+                version or "(absent)",
+                LATEST_PROTOCOL_VERSION,
+            )
+            # id is null: this is a transport-level rejection made before the body
+            # is read, so the request id is not yet known.
+            await JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": UNSUPPORTED_PROTOCOL_VERSION,
+                        "message": (
+                            f"This server requires MCP protocol {LATEST_PROTOCOL_VERSION}. "
+                            f"Received {version or 'no MCP-Protocol-Version header'}."
+                        ),
+                        "data": {"supportedVersions": [LATEST_PROTOCOL_VERSION]},
+                    },
+                },
+                status_code=400,
+            )(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
+
+
 # ───────────────────────── 1. OAuth + MCP server ────────────────────────────
 log.info("Initializing PMxAgent MCP Server...")
 oauth_provider = LocalOAuthProvider(base_url=_MCP_BASE_URL)
-mcp = FastMCP(name="PMxAgent MCP Server", auth=oauth_provider)
+mcp = FastMCP(
+    name="PMxAgent MCP Server",
+    auth=oauth_provider,
+    cache_ttl=_CACHE_TTL_SECONDS,
+    cache_scope=_CACHE_SCOPE,
+)
 
 
 # ──────────────────────── 2. Mount Plumber API ─────────────────────────────
@@ -272,7 +364,7 @@ def mount_plumber_api(timeout: float = 30.0) -> None:
         attempt += 1
         try:
             log.debug(f"Attempt {attempt}: Fetching OpenAPI spec from {spec_url}")
-            spec = httpx.get(spec_url, timeout=2).json()
+            spec = httpx2.get(spec_url, timeout=2).json()
 
             # Extract API metadata
             api_title = spec.get('info', {}).get('title', 'Unknown API')
@@ -290,9 +382,9 @@ def mount_plumber_api(timeout: float = 30.0) -> None:
             # Create async HTTP client for R API.
             # Read timeout is 900s: mode=benchmark scope=wide runs ~185 models (~10 min).
             # mode=simulate compiles rxode2 ODE on first use; mode=list is fast.
-            r_client = httpx.AsyncClient(
+            r_client = httpx2.AsyncClient(
                 base_url=base_url,
-                timeout=httpx.Timeout(connect=10.0, read=900.0, write=30.0, pool=10.0),
+                timeout=httpx2.Timeout(connect=10.0, read=900.0, write=30.0, pool=10.0),
             )
 
             # Build mcp_names mapping from operationIds in spec
@@ -326,7 +418,7 @@ def mount_plumber_api(timeout: float = 30.0) -> None:
 
             return  # Success!
 
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             last_err = exc
             log.warning(f"Attempt {attempt}: HTTP error connecting to R API: {exc.__class__.__name__}: {exc}")
         except ValueError as exc:
@@ -364,22 +456,33 @@ if __name__ == "__main__":
         # Start MCP server
         host = "0.0.0.0"
         port = int(os.getenv("PORT", 8000))
-        path = "/mcp"
+        path = _MCP_PATH
+
+        # Legacy clients are refused unless MCP_ALLOW_LEGACY is set.
+        http_middleware = [] if _ALLOW_LEGACY else [Middleware(ModernProtocolOnlyMiddleware)]
 
         log.info("=" * 60)
         log.info("PMxAgent MCP Server starting...")
         log.info(f"  Transport: streamable-http with OAuth")
+        log.info(f"  MCP protocol: {LATEST_PROTOCOL_VERSION}"
+                 f"{' (legacy clients also admitted)' if _ALLOW_LEGACY else ' only'}")
         log.info(f"  Listening: {host}:{port}")
         log.info(f"  MCP endpoint: {path}")
         log.info(f"  OAuth discovery: /.well-known/oauth-authorization-server")
+        log.info(f"  Cache hint: ttl={_CACHE_TTL_SECONDS}s scope={_CACHE_SCOPE}")
         log.info(f"  Log level: {LOG_LEVEL}")
         log.info("=" * 60)
 
+        # stateless_http: the 2026-07-28 protocol has no sessions, so nothing needs
+        # to be pinned to a connection. This is what lets the server sit behind a
+        # plain round-robin load balancer instead of requiring sticky sessions.
         mcp.run(
             transport="http",
             host=host,
             port=port,
             path=path,
+            middleware=http_middleware,
+            stateless_http=True,
         )
 
     except KeyboardInterrupt:

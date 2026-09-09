@@ -37,7 +37,7 @@ Thank you for your interest in contributing to PMxAgent! This document provides 
 
 4. **Verify services are running:**
    - API docs: http://localhost:5762/__docs__/
-   - MCP server: http://localhost:8000/messages
+   - MCP server: http://localhost:8000/mcp
 
 ## Project Structure
 
@@ -97,18 +97,22 @@ Thank you for your interest in contributing to PMxAgent! This document provides 
    source("endpoints/your_endpoint.R")
    ```
 
-4. **Add tests** in `tests/test_endpoints.py`:
+4. **Add tests** in `tests/test_endpoints.py`. Use the shared `mcp_client` fixture and the
+   `call_tool_ok` helper from `tests/conftest.py` rather than constructing a transport by hand -
+   the fixture carries the Bearer token and negotiates the MCP `2026-07-28` protocol:
    ```python
    @pytest.mark.asyncio
-   async def test_your_endpoint():
-       async with Client(SSETransport(BASE_URL)) as c:
-           raw = (await c.call_tool("r_post_YourEndpoint", {
-               "param1": "value1",
-               "param2": "value2"
-           }))[0].model_dump_json()
-           result = extract_result(raw)
-           assert "result" in result
+   async def test_your_endpoint(mcp_client):
+       result = await call_tool_ok(mcp_client, "r_YourEndpoint", {
+           "param1": "value1",
+           "param2": "value2",
+       })
+       assert "result" in result
    ```
+
+   > The server serves MCP `2026-07-28` only, so an `SSETransport` or any handshake-era client
+   > is refused with JSON-RPC `-32022`. Keep the dev client on the same fastmcp major as
+   > `requirements.txt` (`fastmcp>=4.0.3,<5`).
 
 5. **Test your changes:**
    ```bash
