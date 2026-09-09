@@ -49,8 +49,28 @@ COPY --chown=pmxuser:pmxuser server.py /app/server.py
 # Switch to non-root user
 USER pmxuser
 
-# Note: Health check removed - FastMCP only serves /messages (SSE endpoint)
-# The container is healthy if the process is running (Docker monitors this automatically)
+# Health check: the 2026-07-28 protocol is stateless, so server/discover is a
+# complete request on its own - no handshake, no session to establish. That makes
+# a single POST a valid liveness probe, which was not possible under the old
+# session-based protocol.
+#
+# The probe is unauthenticated, so it cannot assert a 200 - it gets 401. It asserts
+# the status is a real response below 500: that distinguishes "alive and handling
+# requests" (200/400/401) from "alive but failing everything" (500/502/503). A bare
+# `curl -s` exits 0 on a 500 and would call a broken server healthy; `curl -sf` exits
+# non-zero on the 401 and would call a healthy server broken. The lower bound matters
+# too - curl prints "000" when it cannot connect at all, and "000 -lt 500" is true, so
+# testing only the upper bound would report a dead server as healthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD code="$(curl -s -o /dev/null -w '%{http_code}' \
+        -X POST http://localhost:8000/mcp \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" \
+        -H "MCP-Protocol-Version: 2026-07-28" \
+        -H "Mcp-Method: server/discover" \
+        -H "Mcp-Name: server/discover" \
+        -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}')" \
+        && [ "$code" -ge 100 ] && [ "$code" -lt 500 ] || exit 1
 
 # Environment configuration
 ENV PYTHONUNBUFFERED=1

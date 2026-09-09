@@ -78,6 +78,10 @@ services:
       LOG_LEVEL: "INFO"
       MCP_BASE_URL: http://localhost:8000
       MCP_TEST_TOKEN: "pmxagent-ci-token"
+      # Escape hatch. The server serves MCP 2026-07-28 only and refuses handshake-era
+      # clients with JSON-RPC -32022. Set to "true" to re-admit them if a client
+      # cannot yet negotiate the modern protocol - takes a restart, not a rebuild.
+      MCP_ALLOW_LEGACY: "false"
       # No outbound pypi.org call on every container start.
       FASTMCP_CHECK_FOR_UPDATES: "off"
       # ASCII banner is noise in container logs.
