@@ -7,7 +7,7 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
 title: "PMxAgent: An Agentic Platform for Pharmacometrics"
-version: 1.1.0
+version: 1.0.0
 date-released: 2026-09-09
 abstract: |
   PMxAgent is an open-source framework that transforms validated R pharmacometric
@@ -94,11 +94,11 @@ references:
 #   title = {{PMxAgent: Bridging R Pharmacometric Workflows with AI Agents via Model Context Protocol}},
 #   year = {2026},
 #   url = {https://github.com/peterbloomingdale/PMxAgent},
-#   version = {1.1.0},
+#   version = {1.0.0},
 #   license = {AGPL-3.0-only}
 # }
 
 # APA format:
 # Bloomingdale, P. (2026). PMxAgent: Bridging R Pharmacometric Workflows with
-# AI Agents via Model Context Protocol (Version 1.1.0) [Computer software].
+# AI Agents via Model Context Protocol (Version 1.0.0) [Computer software].
 # https://github.com/peterbloomingdale/PMxAgent
