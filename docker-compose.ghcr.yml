@@ -1,0 +1,28 @@
+# docker-compose.ghcr.yml
+
+# Run PMxAgent from the images published to GitHub Container Registry instead of
+# building them locally. Layer it over docker-compose.yml, which stays the single
+# source of truth for ports, environment, healthchecks, volumes and networking:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d --no-build
+#
+# Always `pull` first and pass `--no-build`. Compose merge does not remove the
+# base file's `build:` key, so a service that has both `build:` and `image:` will
+# quietly build from source when the image is missing - which would turn a check
+# of the published artifact into a check of a local rebuild.
+#
+# Tags are a convenience; the digest is the contract. To pin exact bits, set the
+# variables below to digest references:
+#
+#   export PMXAGENT_RAPI_IMAGE=ghcr.io/peterbloomingdale/pmxagent-rapi@sha256:...
+#   export PMXAGENT_MCP_IMAGE=ghcr.io/peterbloomingdale/pmxagent-mcp@sha256:...
+#
+# Both images are linux/amd64 only, matching the platform pins in docker-compose.yml.
+
+services:
+  rapi:
+    image: ${PMXAGENT_RAPI_IMAGE:-ghcr.io/peterbloomingdale/pmxagent-rapi:1.0.0}
+
+  mcp:
+    image: ${PMXAGENT_MCP_IMAGE:-ghcr.io/peterbloomingdale/pmxagent-mcp:1.0.0}
