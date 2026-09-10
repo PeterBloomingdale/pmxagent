@@ -90,6 +90,37 @@ curl http://localhost:5762/openapi.json   # returns JSON
 
 ---
 
+## 📦 Published Images
+
+Release images are published to GitHub Container Registry, so you can run PMxAgent without building the R stack from source:
+
+```
+ghcr.io/peterbloomingdale/pmxagent-rapi
+ghcr.io/peterbloomingdale/pmxagent-mcp
+```
+
+**Pin by digest, not by tag.** Tags move; a digest names exactly one set of bits and is what makes a run reproducible on someone else's machine. Both images are `linux/amd64` only, deliberately — a multi-architecture tag would resolve to a differently-built R library depending on who pulled it.
+
+```bash
+docker pull ghcr.io/peterbloomingdale/pmxagent-rapi@sha256:<digest>
+docker pull ghcr.io/peterbloomingdale/pmxagent-mcp@sha256:<digest>
+```
+
+**Run the published stack:**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d --no-build
+```
+
+Set `PMXAGENT_RAPI_IMAGE` and `PMXAGENT_MCP_IMAGE` to digest references to pin exact bits. Every published digest carries a build provenance attestation:
+
+```bash
+gh attestation verify oci://ghcr.io/peterbloomingdale/pmxagent-rapi@sha256:<digest> \
+  --owner PeterBloomingdale
+```
+
+---
+
 ## 🎯 What PMxAgent Does
 
 PMxAgent provides five pharmacometric endpoints, each exposed as an HTTP API and an MCP tool:

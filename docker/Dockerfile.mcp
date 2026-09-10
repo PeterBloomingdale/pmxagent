@@ -2,7 +2,12 @@
 # Multi-stage build for smaller final image
 
 # ============== Build stage ==============
-FROM python:3.11-slim AS builder
+# Pinned by tag AND digest for reproducible builds, matching Dockerfile.rapi:
+# an unpinned tag lets the interpreter and its system libraries change under
+# the pinned Python dependencies on any rebuild.
+# This is the linux/amd64 manifest digest, resolved 2026-09-10 - builds must
+# target linux/amd64, which docker-compose.yml already sets on both services.
+FROM python:3.11-slim@sha256:d1053354624536b044162aaab1e418bd000ea35184fb1ae098ab3166b1072e72 AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,12 +25,25 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /tmp/requirements.txt
 
 # ============== Runtime stage ==============
-FROM python:3.11-slim
+# Pinned by tag AND digest for reproducible builds, matching Dockerfile.rapi:
+# an unpinned tag lets the interpreter and its system libraries change under
+# the pinned Python dependencies on any rebuild.
+# This is the linux/amd64 manifest digest, resolved 2026-09-10 - builds must
+# target linux/amd64, which docker-compose.yml already sets on both services.
+FROM python:3.11-slim@sha256:d1053354624536b044162aaab1e418bd000ea35184fb1ae098ab3166b1072e72
 
 # Image metadata
 LABEL maintainer="PMxAgent Team"
 LABEL description="Python MCP Server for exposing R API via Model Context Protocol"
-LABEL version="1.0.0"
+
+# OCI standard labels. image.source is what links the published GHCR package
+# back to this repository, so the package inherits repo permissions and shows
+# a Source link. The remaining OCI labels are set at the end of the file.
+LABEL org.opencontainers.image.source="https://github.com/PeterBloomingdale/pmxagent"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
+LABEL org.opencontainers.image.vendor="Generate Biomedicines"
+LABEL org.opencontainers.image.title="pmxagent-mcp"
+LABEL org.opencontainers.image.description="Python MCP Server for exposing R API via Model Context Protocol"
 
 # Install only runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -75,6 +93,16 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Environment configuration
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+
+# Build-time provenance, supplied by CI. Kept at the end of the file on purpose:
+# a LABEL that consumes an ARG changes on every build, and anything below it
+# would rebuild each time. Defaults keep a bare `docker build` sensible.
+ARG VERSION=1.0.0
+ARG VCS_REF=unknown
+ARG BUILD_DATE=
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
 
 # Expose port
 EXPOSE 8000

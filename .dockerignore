@@ -46,7 +46,16 @@ credentials.*
 
 # Logs and generated files
 *.log
+
+# Runtime-populated directories - bind-mounted into the rapi container at
+# runtime, never copied into an image. .gitignore treats figures/ and data/
+# identically; .dockerignore now does too.
 figures/
+data/
+
+# Manuscript sources - not part of any image, and .gitignore does not govern
+# the build context.
+manuscript/
 
 # OS files
 .DS_Store

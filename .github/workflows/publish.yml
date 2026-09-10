@@ -1,0 +1,366 @@
+name: Publish images
+
+# Published digests are what downstream consumers pin, so they are only produced
+# for a release tag or a deliberate manual run - never on every push to main.
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+# GHCR requires lowercase paths. github.repository_owner evaluates to
+# "PeterBloomingdale" with capitals, so the image names are lowercase literals.
+env:
+  RAPI_IMAGE: ghcr.io/peterbloomingdale/pmxagent-rapi
+  MCP_IMAGE: ghcr.io/peterbloomingdale/pmxagent-mcp
+
+jobs:
+  build-rapi:
+    name: Build and push rapi
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Reclaim runner disk space
+        run: |
+          # The R image compiles rxode2/symengine and needs more headroom than a
+          # default runner has free.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Record build timestamp
+        run: |
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.RAPI_IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+          flavor: latest=false
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.rapi
+          # Single platform on purpose. A manifest list would make one pinned
+          # digest resolve to different bits per architecture, and provenance:false
+          # keeps the push a plain image manifest rather than an index - together
+          # that is what keeps the digest unambiguous.
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          push: true
+          # Tags only. metadata-action's auto-labels would set
+          # org.opencontainers.image.title to the repository name and clobber the
+          # per-image title; the Dockerfiles own the labels.
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          cache-from: type=gha,scope=rapi
+          cache-to: type=gha,scope=rapi,mode=max
+
+      - name: Report digest
+        run: |
+          echo "\`${RAPI_IMAGE}@${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  build-mcp:
+    name: Build and push mcp
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Record build timestamp
+        run: |
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.MCP_IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+          flavor: latest=false
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.mcp
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          cache-from: type=gha,scope=mcp
+          cache-to: type=gha,scope=mcp,mode=max
+
+      - name: Report digest
+        run: |
+          echo "\`${MCP_IMAGE}@${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    name: Verify published images
+    needs: [ build-rapi, build-mcp ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      PMXAGENT_RAPI_IMAGE: ghcr.io/peterbloomingdale/pmxagent-rapi@${{ needs.build-rapi.outputs.digest }}
+      PMXAGENT_MCP_IMAGE: ghcr.io/peterbloomingdale/pmxagent-mcp@${{ needs.build-mcp.outputs.digest }}
+      RAPI_DIGEST: ${{ needs.build-rapi.outputs.digest }}
+      MCP_DIGEST: ${{ needs.build-mcp.outputs.digest }}
+      MCP_TEST_TOKEN: "pmxagent-ci-token"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # Needed on a first run, when the packages are still private.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull both images by digest
+        run: |
+          set -euo pipefail
+          docker pull "$PMXAGENT_RAPI_IMAGE"
+          docker pull "$PMXAGENT_MCP_IMAGE"
+
+      - name: Assert RepoDigests resolve
+        run: |
+          set -euo pipefail
+          # An empty RepoDigests is exactly the condition that forces a consumer
+          # to fall back to a local image ID, so assert it directly.
+          for pair in "$PMXAGENT_RAPI_IMAGE $RAPI_DIGEST" "$PMXAGENT_MCP_IMAGE $MCP_DIGEST"; do
+            set -- $pair
+            ref="$1"; digest="$2"
+            repo_digests="$(docker inspect --format '{{json .RepoDigests}}' "$ref")"
+            echo "$ref -> $repo_digests"
+            if [ "$repo_digests" = "[]" ] || [ "$repo_digests" = "null" ]; then
+              echo "::error::RepoDigests is empty for $ref"
+              exit 1
+            fi
+            case "$repo_digests" in
+              *"$digest"*) ;;
+              *) echo "::error::RepoDigests for $ref does not contain $digest"; exit 1 ;;
+            esac
+          done
+
+      - name: Pull the compose stack by digest
+        run: |
+          set -euo pipefail
+          # Explicit pull so a missing image is a hard failure. Compose merge does
+          # not remove the base file's build: key, and a service with both build:
+          # and image: builds from source when the image is absent - which would
+          # make this job verify a local rebuild instead of the published artifact.
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
+
+      - name: Start the stack
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml \
+            up -d --no-build --wait --wait-timeout 300
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml ps
+
+      - name: Assert running containers use the published digests
+        run: |
+          set -euo pipefail
+          # Closes the silent build-fallback hole: prove the containers that are
+          # actually running came from the digests this workflow just pushed.
+          for pair in "pmxagent-rapi $RAPI_DIGEST" "pmxagent-mcp $MCP_DIGEST"; do
+            set -- $pair
+            container="$1"; digest="$2"
+            image_id="$(docker inspect --format '{{.Image}}' "$container")"
+            repo_digests="$(docker inspect --format '{{json .RepoDigests}}' "$image_id")"
+            echo "$container -> $repo_digests"
+            case "$repo_digests" in
+              *"$digest"*) ;;
+              *) echo "::error::$container is not running $digest"; exit 1 ;;
+            esac
+          done
+
+      - name: Assert rapi serves the OpenAPI spec
+        run: |
+          set -euo pipefail
+          curl -fsS http://localhost:5762/openapi.json -o /tmp/openapi.json
+          jq -e '.paths["/NCA"]' /tmp/openapi.json > /dev/null
+          echo "✓ R API served /openapi.json with the /NCA path"
+
+      - name: Assert mcp answers an unauthenticated server/discover
+        run: |
+          set -euo pipefail
+          # Same request shape as the HEALTHCHECK in docker/Dockerfile.mcp: the
+          # probe is unauthenticated so it cannot expect a 200, and asserts a real
+          # response below 500. curl reports 000 when it cannot connect at all.
+          code="$(curl -s -o /tmp/discover_anon.txt -w '%{http_code}' \
+              -X POST http://localhost:8000/mcp \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json, text/event-stream" \
+              -H "MCP-Protocol-Version: 2026-07-28" \
+              -H "Mcp-Method: server/discover" \
+              -H "Mcp-Name: server/discover" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}')"
+          echo "server/discover (unauthenticated) -> HTTP $code"
+          if [ "$code" -ge 100 ] && [ "$code" -lt 500 ]; then
+            echo "✓ MCP server is alive and handling requests"
+          else
+            echo "::error::server/discover returned HTTP $code"
+            cat /tmp/discover_anon.txt
+            exit 1
+          fi
+
+      - name: Assert mcp answers an authenticated server/discover
+        run: |
+          set -euo pipefail
+          code="$(curl -s -o /tmp/discover_auth.txt -w '%{http_code}' \
+              -X POST http://localhost:8000/mcp \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json, text/event-stream" \
+              -H "Authorization: Bearer ${MCP_TEST_TOKEN}" \
+              -H "MCP-Protocol-Version: 2026-07-28" \
+              -H "Mcp-Method: server/discover" \
+              -H "Mcp-Name: server/discover" \
+              -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}')"
+          echo "server/discover (authenticated) -> HTTP $code"
+          if [ "$code" -ne 200 ]; then
+            echo "::error::authenticated server/discover returned HTTP $code"
+            cat /tmp/discover_auth.txt
+            exit 1
+          fi
+          grep -q "PMxAgent" /tmp/discover_auth.txt
+          echo "✓ MCP server identified itself over the 2026-07-28 protocol"
+
+      - name: Assert the R API tools are mounted
+        run: |
+          set -euo pipefail
+          # The mcp container only starts once it has mounted the R API's OpenAPI
+          # spec, so a populated tools/list proves the two published images work
+          # wired together, not just individually.
+          code="$(curl -s -o /tmp/tools.txt -w '%{http_code}' \
+              -X POST http://localhost:8000/mcp \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json, text/event-stream" \
+              -H "Authorization: Bearer ${MCP_TEST_TOKEN}" \
+              -H "MCP-Protocol-Version: 2026-07-28" \
+              -H "Mcp-Method: tools/list" \
+              -H "Mcp-Name: tools/list" \
+              -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}')"
+          echo "tools/list -> HTTP $code"
+          if [ "$code" -ne 200 ]; then
+            echo "::error::tools/list returned HTTP $code"
+            cat /tmp/tools.txt
+            exit 1
+          fi
+          grep -q "Noncompartmental_analysis_NCA" /tmp/tools.txt
+          echo "✓ Pharmacometric tools are exposed over MCP"
+
+      - name: Write digests to the job summary
+        run: |
+          {
+            echo "## Published images"
+            echo
+            echo "Pin by digest. Tags are a convenience."
+            echo
+            echo '```'
+            echo "${PMXAGENT_RAPI_IMAGE}"
+            echo "${PMXAGENT_MCP_IMAGE}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "=== R API Logs ==="
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml logs rapi
+          echo "=== MCP Server Logs ==="
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml logs mcp
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ghcr.yml down -v
+
+  attest:
+    name: Attest build provenance
+    needs: [ build-rapi, build-mcp, verify ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # push-to-registry writes the attestation alongside the image in GHCR, so an
+      # auditor without a GitHub account can still retrieve it.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest rapi
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.RAPI_IMAGE }}
+          subject-digest: ${{ needs.build-rapi.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest mcp
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.MCP_IMAGE }}
+          subject-digest: ${{ needs.build-mcp.outputs.digest }}
+          push-to-registry: true
