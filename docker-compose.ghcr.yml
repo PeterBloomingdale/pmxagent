@@ -22,7 +22,7 @@
 
 services:
   rapi:
-    image: ${PMXAGENT_RAPI_IMAGE:-ghcr.io/peterbloomingdale/pmxagent-rapi:1.0.0}
+    image: ${PMXAGENT_RAPI_IMAGE:-ghcr.io/peterbloomingdale/pmxagent-rapi:1.1.0}
 
   mcp:
-    image: ${PMXAGENT_MCP_IMAGE:-ghcr.io/peterbloomingdale/pmxagent-mcp:1.0.0}
+    image: ${PMXAGENT_MCP_IMAGE:-ghcr.io/peterbloomingdale/pmxagent-mcp:1.1.0}

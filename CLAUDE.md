@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-PMxAgent transforms validated R pharmacometric workflows into AI-ready HTTP APIs. The architecture consists of:
+**Status:** the tools in this repository are example implementations and have not been verified or validated. Users are responsible for their own development, deployment, and verification/validation before use. Keep this notice at the top of `README.md`.
+
+PMxAgent transforms R pharmacometric workflows into AI-ready HTTP APIs. The architecture consists of:
 - **R Plumber API** (modular structure in `apis/`): Pharmacometric endpoints (NCA, ER, PK, DATA, LIBRARY)
   - `apis/rapi.R` - Lightweight router using `copy_routes()` helper to compose endpoint modules
   - `apis/endpoints/` - Self-contained endpoint modules with Plumber annotations and dependencies
@@ -339,7 +341,7 @@ curl -X POST http://localhost:5762/NCA \
   - `auc_unit` - AUC unit label for x-axis (default: "h*ug/mL") — **display label only**, no validation or numeric conversion
   - `figure_dir` - Output directory for figures (default: "/figures")
 - **Unit handling**: No unit validation or conversion. `auc_unit` is used solely as a plot axis label. Response values are treated as unitless.
-- **Model selection**: Auto mode selects best model by AIC
+- **Model selection**: Auto mode selects the logit model by rule for binary (0/1) responses, and the lowest-AIC model otherwise. AIC is not comparable between the logit (binomial likelihood) and the least-squares models, so cross-family AICs must not be used to rank them. Response includes `model_selection` (rule used) and `aic_comparable`. No significance test of the exposure effect is reported, and `resp_rate` is a data-generation convenience that draws responses by dose group; all models are then fitted to the individual subjects' exposure and response values.
 - **Returns**: Best model parameters, fit statistics (AIC, R²), plot path, all fitted models. When `resp_rate` is used, also returns `resp_rate_generation` with the rates, seed, and generated binary responses.
 - **Plot output**: `/figures/ER_YYYYMMDD_HHMMSS.png`
 
@@ -637,6 +639,13 @@ curl -X POST http://localhost:5762/NCA -d 'data_file=nca_benchmark.csv'
 - Environment variable `RAPI_OPENAPI_URL` for R API location (defaults to http://localhost:5762/openapi.json)
 - Detailed logging at DEBUG level for troubleshooting
 - All endpoints automatically exposed as MCP tools via OpenAPI spec
+
+### Changelog
+- Maintain `CHANGELOG.md` (Keep a Changelog format, Semantic Versioning). Add an entry under `## [Unreleased]` in the same PR as any user-visible change.
+- Use only these headings: Added, Changed, Fixed, Removed, Deprecated, Security. Write one line per entry for users; do not paste commit messages.
+- Always flag explicitly: **tool changes** (renamed endpoint, changed parameter or default, which alter the MCP tool schema agents see); **numerical changes** (anything that could change results, stating which outputs may differ); **dependency changes** (base image, FastMCP, MCP spec version, R packages); and the new total when the **test count** changes.
+- Do not bump the version, create tags, or publish GitHub Releases. A maintainer cuts the release.
+- Internal-only changes (refactor, comments, CI) need no entry.
 
 ### Testing
 - **Python tests** (`tests/test_endpoints.py`): Integration tests via MCP client

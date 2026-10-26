@@ -6,8 +6,14 @@
 [![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 [![R](https://img.shields.io/badge/r-%23276DC3.svg?style=flat&logo=r&logoColor=white)](https://www.r-project.org/)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](tests/)
+[![Tests](https://github.com/PeterBloomingdale/pmxagent/actions/workflows/test.yml/badge.svg)](https://github.com/PeterBloomingdale/pmxagent/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+
+> [!IMPORTANT]
+> **Example tools, not validated.** Although these tools have been tested and verified for analytical
+> accuracy, they are provided as examples and should not be considered validated for regulatory or
+> decision-making use. You are responsible for your own verification and validation before relying on
+> any result.
 
 ---
 
@@ -37,7 +43,7 @@
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-PMxAgent is an agentic platform for building custom pharmacometric agents and automation pipelines. Validated R functions are exposed as RESTful API endpoints, converted to agent-callable tools, and wrapped by a Model Context Protocol (MCP) server — all orchestrated with Docker.
+PMxAgent is an agentic platform for building custom pharmacometric agents and automation pipelines. R functions are exposed as RESTful API endpoints, converted to agent-callable tools, and wrapped by a Model Context Protocol (MCP) server — all orchestrated with Docker.
 
 ---
 
@@ -64,6 +70,8 @@ PMxAgent is an agentic platform for building custom pharmacometric agents and au
 - 🎯 **Accurate** — Validated against analytical solutions and ground truth.
 - ⚡ **Efficient** — Setup in 60 seconds. Run analyses in minutes, not days.
 
+*Although these tools have been tested and verified for analytical accuracy, they are provided as examples and should not be considered validated for regulatory or decision-making use. Users are responsible for their own verification and validation before relying on any result.*
+
 ---
 
 ## 🚀 Quick Start
@@ -71,8 +79,8 @@ PMxAgent is an agentic platform for building custom pharmacometric agents and au
 **Prerequisites:** [Docker Desktop](https://www.docker.com/) 4.0+ (running) and Git.
 
 ```bash
-git clone https://github.com/peterbloomingdale/PMxAgent.git
-cd PMxAgent
+git clone https://github.com/PeterBloomingdale/pmxagent.git
+cd pmxagent
 docker compose up --build -d
 ```
 
@@ -128,7 +136,7 @@ PMxAgent provides five pharmacometric endpoints, each exposed as an HTTP API and
 | Endpoint | Purpose | Highlights |
 |----------|---------|------------|
 | `POST /NCA` | Non-compartmental analysis | Cmax, Tmax, AUC, half-life; multi-subject mode; automatic unit derivation; reads ADPC files via `data_file` |
-| `POST /ER` | Exposure-response modeling | Auto-selects best model by AIC; two-panel visualization |
+| `POST /ER` | Exposure-response modeling | Linear, Emax, Imax, and logit fits; `auto` uses logit for binary responses and lowest AIC otherwise; currently no significance test; two-panel visualization |
 | `POST /PK` | PK simulation | 1- or 2-compartment IV; population mode with between-subject variability; optional CSV output |
 | `POST /DATA` | Data formatting | Reads raw CSV/Excel; standardizes to CDISC ADPC format; feeds `/NCA` directly |
 | `POST /LIBRARY` | Model library | List, simulate, or benchmark literature PK models from `nlmixr2lib`; faithful rxode2 population PK; outputs ADPC CSV |
@@ -179,8 +187,11 @@ Generated plots land in `figures/`; drop input files (CSV/Excel) into `data/`. B
 ```bash
 # Python integration tests (via MCP)
 pip install -r requirements-dev.txt
+# Normal use needs no token. The tests skip browser sign-in with a static token that is
+# off by default; put one in .env (gitignored) and both compose and pytest pick it up.
+echo "MCP_TEST_TOKEN=$(openssl rand -hex 16)" > .env
 docker compose up -d
-MCP_TEST_TOKEN=pmxagent-ci-token pytest tests/ -v
+pytest tests/ -v
 
 # R unit tests (inside the container)
 docker compose exec rapi Rscript /home/rstudio/apis/tests/test_nca.R
@@ -195,6 +206,7 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_library_models.R
 - **R changes not showing up?** Rebuild — `docker compose down && docker compose up --build`. A plain `restart` won't pick up code changes.
 - **Port already in use?** Check with `lsof -i :8000` and `lsof -i :5762`, then free the port or change it in `docker-compose.yml`.
 - **Agent can't connect?** Confirm the MCP URL is `http://localhost:8000/mcp` (not `/messages`), and approve the OAuth prompt on first connection. Tokens refresh automatically on reconnect.
+- **OAuth sign-in fails, or "Client ID not found"?** The client's `iss` check compares against the issuer in `/.well-known/oauth-authorization-server`, which includes a trailing slash (`http://localhost:8000/`). Update to the latest image. Registered clients are stored in the `mcp-state` Docker volume and survive restarts; to reset them, run `docker compose down` and `docker volume rm pmxagent_mcp-state`, then reconnect the client.
 - **Agent rejected with `-32022`?** Its MCP client is on the older handshake protocol; PMxAgent serves `2026-07-28` only. Either update the client, or set `MCP_ALLOW_LEGACY=true` in `docker-compose.yml` and `docker compose up -d mcp`.
 
 ---
@@ -213,6 +225,12 @@ A manuscript describing PMxAgent is in preparation. In the meantime, please cite
   note         = {Publication pending}
 }
 ```
+
+---
+
+## 📝 Changelog
+
+User-visible changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 

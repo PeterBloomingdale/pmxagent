@@ -7,12 +7,14 @@
 #* Shows response vs exposure (AUC) with quantile-based data display and optional dose group bars.
 #* Supports binary (0/1) response data with logit model.
 #* When resp_rate is provided with dose, binary responses are generated from target rates using seed for reproducibility.
+#* resp_rate is a data-generation convenience: responses are drawn per dose group, then all models are fitted to the individual subjects' exposure and response values.
+#* The endpoint reports fitted curves and fit statistics only; it does not test whether the exposure effect differs from zero.
 #* @param exposure Comma-separated exposure values (AUC). Default: 60 subjects (20 per dose) from PK/NCA case study
 #* @param resp Comma-separated responses (continuous or binary 0/1). Default: binary responses following logistic E-R
 #* @param dose Comma-separated dose labels (optional). Default: 10 mg, 30 mg, 100 mg groups
 #* @param resp_rate Comma-separated target response rates per dose group (e.g. "0.1,0.5,0.9"). When provided with dose, generates binary responses from these rates using seed. Overrides resp.
 #* @param seed Random seed for reproducible binary response generation when resp_rate is used (string, optional, default "42")
-#* @param model Model type: "auto", "linear", "emax", "imax", or "logit" (default: "auto")
+#* @param model Model type: "auto", "linear", "emax", "imax", or "logit" (default: "auto"). For binary (0/1) responses, "auto" selects the logit model whenever it converges, by rule rather than by AIC. For continuous responses, "auto" selects the lowest AIC among the converged models. AIC is not comparable between the logit model (binomial likelihood) and the linear/Emax/Imax models (least squares), so the AIC values reported across model families must not be used to rank them.
 #* @param n_quantiles Number of quantiles for visualization (default: "4")
 #* @param subject_id Comma-separated subject IDs for tracking (string, optional)
 #* @param auc_unit AUC unit label for x-axis (default: "h*ug/mL")
@@ -121,17 +123,20 @@ function(exposure = "440.3,582.0,626.1,764.0,769.7,604.1,586.8,833.6,607.8,871.9
     }
 
     # Select best model
+    is_binary <- is_binary_response(rs)
     if (model == "auto") {
       if (length(aics) == 0) stop("No models converged successfully")
       # For binary data, prioritize logit model if it converged
-      is_binary <- is_binary_response(rs)
       if (is_binary && "logit" %in% names(aics)) {
         best_model <- "logit"
+        model_selection <- "logit selected by rule for binary response; AIC was not used to rank models"
       } else {
         best_model <- names(which.min(aics))
+        model_selection <- "lowest AIC among converged models"
       }
     } else {
       best_model <- model
+      model_selection <- "model specified by the caller"
       if (!best_model %in% names(models)) {
         stop(sprintf("Model '%s' did not converge or is not available for this data", best_model))
       }
@@ -211,6 +216,9 @@ function(exposure = "440.3,582.0,626.1,764.0,769.7,604.1,586.8,833.6,607.8,871.9
     # Return results
     result <- list(
       model_used = best_model,
+      model_selection = model_selection,
+      # The logit AIC comes from a binomial likelihood and the others from least squares.
+      aic_comparable = !(is_binary && "logit" %in% names(aics)),
       parameters = params[[best_model]],
       fit_stats = fit_stats[[best_model]],
       plot_path = outfile,

@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    env:
+      MCP_TEST_TOKEN: "pmxagent-ci-token"
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

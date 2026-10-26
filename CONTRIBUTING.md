@@ -211,6 +211,7 @@ All contributions must include tests:
 - [ ] All tests pass locally
 - [ ] New tests added for new functionality
 - [ ] Documentation updated (README, CLAUDE.md, etc.)
+- [ ] `CHANGELOG.md` updated under `## [Unreleased]` for any user-visible change (see the Changelog section in CLAUDE.md for the flags to call out)
 - [ ] No merge conflicts with main branch
 - [ ] Descriptive commit messages
 - [ ] PR description explains the changes

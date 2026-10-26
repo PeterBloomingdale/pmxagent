@@ -58,6 +58,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Create non-root user
 RUN useradd -m -u 1001 -s /bin/bash pmxuser
 
+# Writable state directory for persisted OAuth client registrations. Created here so
+# a named volume mounted at /state inherits pmxuser ownership on first use.
+RUN mkdir -p /state && chown pmxuser:pmxuser /state
+
 # Set working directory
 WORKDIR /app
 
@@ -97,7 +101,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Build-time provenance, supplied by CI. Kept at the end of the file on purpose:
 # a LABEL that consumes an ARG changes on every build, and anything below it
 # would rebuild each time. Defaults keep a bare `docker build` sensible.
-ARG VERSION=1.0.0
+ARG VERSION=1.1.0
 ARG VCS_REF=unknown
 ARG BUILD_DATE=
 LABEL org.opencontainers.image.version="${VERSION}"

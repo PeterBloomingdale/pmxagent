@@ -4,6 +4,7 @@ PMxAgent MCP Server
 Exposes R pharmacometric API via Model Context Protocol with OAuth authentication.
 """
 import os
+import json
 import time
 import logging
 import secrets
@@ -65,6 +66,13 @@ logging.getLogger("fakeredis").setLevel(logging.WARNING)
 # Optional static token for CI/automated testing (avoids full browser OAuth flow)
 _MCP_TEST_TOKEN = os.getenv("MCP_TEST_TOKEN", "")
 _MCP_BASE_URL = os.getenv("MCP_BASE_URL", "http://localhost:8000")
+# The issuer exactly as the discovery document advertises it. pydantic normalizes the
+# URL (a bare host gains a trailing slash), and a client that validates the RFC 9207
+# `iss` parameter compares it to this string byte for byte, so the authorization
+# redirect must use the same value.
+_MCP_ISSUER = str(AnyHttpUrl(_MCP_BASE_URL))
+# Where dynamically registered OAuth clients are persisted (mounted volume in docker-compose).
+_MCP_CLIENTS_FILE = os.getenv("MCP_CLIENTS_FILE", "/state/oauth_clients.json")
 
 # Path the MCP protocol is served on. Module-level so the protocol middleware and
 # the run() call cannot disagree about which requests are MCP traffic.
@@ -116,7 +124,7 @@ class LocalOAuthProvider(OAuthProvider):
             ),
             revocation_options=RevocationOptions(enabled=True),
         )
-        self._clients: dict[str, OAuthClientInformationFull] = {}
+        self._clients: dict[str, OAuthClientInformationFull] = self._load_clients()
         self._codes: dict[str, AuthorizationCode] = {}
         self._access: dict[str, AccessToken] = {}
         self._refresh: dict[str, RefreshToken] = {}
@@ -139,11 +147,43 @@ class LocalOAuthProvider(OAuthProvider):
 
     # ── Client registration ──────────────────────────────────────────────────
 
+    @staticmethod
+    def _load_clients() -> dict[str, OAuthClientInformationFull]:
+        # Registered clients survive container restarts. Without this, a client
+        # that cached its client_id keeps presenting it after a restart and every
+        # /authorize returns "Client ID not found". Tokens and codes stay in memory.
+        try:
+            with open(_MCP_CLIENTS_FILE, encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except FileNotFoundError:
+            return {}
+        except (OSError, json.JSONDecodeError) as exc:
+            log.warning("Could not read OAuth client store %s: %s", _MCP_CLIENTS_FILE, exc)
+            return {}
+        clients = {cid: OAuthClientInformationFull.model_validate(info) for cid, info in raw.items()}
+        log.info("Loaded %d persisted OAuth client(s) from %s", len(clients), _MCP_CLIENTS_FILE)
+        return clients
+
+    def _save_clients(self) -> None:
+        os.makedirs(os.path.dirname(_MCP_CLIENTS_FILE) or ".", exist_ok=True)
+        payload = {cid: info.model_dump(mode="json") for cid, info in self._clients.items()}
+        tmp_path = f"{_MCP_CLIENTS_FILE}.tmp"
+        # The store holds client secrets, so keep it readable by the server user only.
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        os.replace(tmp_path, _MCP_CLIENTS_FILE)
+
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         return self._clients.get(client_id)
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         self._clients[client_info.client_id] = client_info
+        # Persistence is best effort: a read-only or misowned volume must not block sign-in.
+        try:
+            self._save_clients()
+        except OSError as exc:
+            log.warning("Could not persist OAuth client store %s: %s", _MCP_CLIENTS_FILE, exc)
         log.debug("Registered OAuth client: %s (%s)", client_info.client_id, client_info.client_name)
 
     # ── Authorization code flow ──────────────────────────────────────────────
@@ -169,7 +209,7 @@ class LocalOAuthProvider(OAuthProvider):
         # code, which defends against mix-up attacks when a client talks to several
         # authorization servers.
         return construct_redirect_uri(
-            str(params.redirect_uri), code=code, state=params.state, iss=_MCP_BASE_URL
+            str(params.redirect_uri), code=code, state=params.state, iss=_MCP_ISSUER
         )
 
     async def load_authorization_code(
@@ -443,7 +483,7 @@ def health() -> dict:
     return {
         "status": "healthy",
         "service": "PMxAgent MCP Server",
-        "version": "1.0.0"
+        "version": "1.1.0"
     }
 
 
