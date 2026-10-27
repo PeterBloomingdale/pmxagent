@@ -42,6 +42,7 @@ data/*
 # Secrets
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 credentials.*
@@ -69,3 +70,4 @@ vignettes/
 
 # Explicit pycache in subdirs
 tests/__pycache__/
+mcp-state/

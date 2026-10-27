@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-PMxAgent transforms validated R pharmacometric workflows into AI-ready HTTP APIs. The architecture consists of:
+**Status:** the tools in this repository are example implementations and have not been verified or validated. Users are responsible for their own development, deployment, and verification/validation before use. Keep this notice at the top of `README.md`.
+
+PMxAgent transforms R pharmacometric workflows into AI-ready HTTP APIs. The architecture consists of:
 - **R Plumber API** (modular structure in `apis/`): Pharmacometric endpoints (NCA, ER, PK, DATA, LIBRARY)
   - `apis/rapi.R` - Lightweight router using `copy_routes()` helper to compose endpoint modules
   - `apis/endpoints/` - Self-contained endpoint modules with Plumber annotations and dependencies
@@ -38,6 +40,12 @@ docker compose down -v && docker compose up --build
 ```bash
 # Install test dependencies
 pip install -r requirements-dev.txt
+
+# The default docker-compose.yml does not enable the static test token, so the
+# tests need one. Set MCP_TEST_TOKEN in the environment or a gitignored .env
+# (see .env.example), then start the stack with the same value:
+#   echo "MCP_TEST_TOKEN=$(openssl rand -hex 16)" > .env
+#   docker compose up -d --build
 
 # Run Python integration tests
 pytest tests/ -v
@@ -162,6 +170,9 @@ capabilities.
 
 ### Volume Mounts
 - `./figures:/figures` - Persistent storage for generated plots across container restarts
+- `./data:/data` - Input and output CSVs for `/DATA`, `/NCA`, `/PK` and `/LIBRARY`
+- `mcp-state:/state` (named volume, `mcp` container) - Persists OAuth client registrations only; MCP itself stays stateless. Reset with `docker compose down` then `docker volume rm pmxagent_mcp-state`
+- On Linux hosts, `rapi` runs as uid 1001 (`pmxuser`), so `./figures` and `./data` must be writable by it (e.g. `chmod 777 figures data`) or every endpoint that writes a file fails with a 500
 
 ### Platform
 - Both containers use `platform: linux/amd64` for Apple Silicon compatibility
@@ -179,6 +190,9 @@ Comprehensive NCA endpoint leveraging PKNCA's native features including route of
   - `conc_unit` - Unit of concentration: `"ug/mL"` (default), `"ng/mL"`, `"mg/L"`, `"g/L"`, `"umol/L"`, `"nmol/L"`
   - `time_unit` - Unit of time: `"h"` (default), `"min"`, `"d"`
   - `BW` - Body weight in kg (default "70"); required when `dose_unit="mg/kg"`
+  - `subject_id` - Subject ID label for single-subject use (optional)
+  - `dose_label` - Dose label for grouping (optional)
+  - `pk_data` - JSON-encoded PK data from `/PK` for workflow chaining (optional)
 
 **Route of Administration**:
 - `route` - `"iv_bolus"`, `"iv_infusion"`, or `"extravascular"` (default). Also accepts the **numeric
@@ -192,9 +206,9 @@ Comprehensive NCA endpoint leveraging PKNCA's native features including route of
 - `tau` - Dosing interval in time_unit (required for repeat/steady_state)
 
 **BLQ Handling**:
-- `blq_first` - Pre-first-dose BLQ: `"keep"` (default), `"drop"`, `"zero"`
+- `blq_first` - Pre-first-dose BLQ: `"keep"`, `"drop"`, `"zero"` (default)
 - `blq_middle` - Between-dose BLQ: `"keep"`, `"drop"` (default), `"zero"`
-- `blq_last` - Terminal phase BLQ: `"keep"` (default), `"drop"`, `"zero"`
+- `blq_last` - Terminal phase BLQ: `"keep"`, `"drop"` (default), `"zero"`
 
 **Business Rules**:
 - `auc_method` - `"lin up/log down"` (default), `"linear"`, `"lin-log"`
@@ -331,7 +345,7 @@ curl -X POST http://localhost:5762/NCA \
 
 ### POST /ER (Exposure-Response)
 - **Required params**: `exposure`, `resp` (comma-separated numeric strings, have defaults for Swagger UI)
-- **Optional params**: `model` ("auto", "linear", "emax", "imax", "logit")
+- **Optional params**: `model` ("auto", "linear", "emax", "imax", "logit"); `dose` (per-subject dose labels, e.g. `"10 mg,10 mg,30 mg"`, used to group `resp_rate` generation and the quantile/box plots); `subject_id` (tracking IDs); `n_quantiles` (default `"4"`, range 2-10)
 - **Response generation params** (alternative to providing `resp` directly):
   - `resp_rate` - Comma-separated target response rates per dose group (e.g., `"0.1,0.5,0.9"`). When provided with `dose`, generates binary (0/1) responses from these rates using `rbinom()`. Overrides `resp`.
   - `seed` - Random seed for reproducible response generation (default: `"42"`). Only used when `resp_rate` is provided.
@@ -339,8 +353,9 @@ curl -X POST http://localhost:5762/NCA \
   - `auc_unit` - AUC unit label for x-axis (default: "h*ug/mL") — **display label only**, no validation or numeric conversion
   - `figure_dir` - Output directory for figures (default: "/figures")
 - **Unit handling**: No unit validation or conversion. `auc_unit` is used solely as a plot axis label. Response values are treated as unitless.
-- **Model selection**: Auto mode selects best model by AIC
-- **Returns**: Best model parameters, fit statistics (AIC, R²), plot path, all fitted models. When `resp_rate` is used, also returns `resp_rate_generation` with the rates, seed, and generated binary responses.
+- **Model selection**: Auto mode selects the logit model by rule for binary (0/1) responses, and the lowest-AIC model otherwise. AIC is not comparable between the logit (binomial likelihood) and the least-squares models, so cross-family AICs must not be used to rank them. Response includes `model_selection` (rule used) and `aic_comparable`. No significance test of the exposure effect is reported, and `resp_rate` is a data-generation convenience that draws responses by dose group; all models are then fitted to the individual subjects' exposure and response values.
+- **Default data**: the built-in `exposure`/`resp`/`dose` vectors exist for Swagger UI demos. They are **not** the paper's case-study data (they give 2/8/20 responders at 10/30/100 mg, vs 5/12/17 from the case-study run), so calling `/ER` with no arguments does not reproduce the paper.
+- **Returns**: Best model parameters, fit statistics (AIC, R²), `model_selection`, `aic_comparable`, plot path, `quantile_summary`, all fitted models. When `resp_rate` is used, also returns `resp_rate_generation` with the rates, seed, and generated binary responses.
 - **Plot output**: `/figures/ER_YYYYMMDD_HHMMSS.png`
 
 ### POST /PK (Pharmacokinetic Simulation)
@@ -357,10 +372,13 @@ Supports three modes:
 - `Q` - Intercompartmental clearance per kg in mL/h/kg (default 0.27 - Betts 2018, optional for 2CM)
 - `BW` - Body weight in kg (default "70")
 - `t` - Time points, comma-separated
-- `model` - "auto", "1cm", or "2cm"
+- `model` - "auto", "1cm", or "2cm" (default "2cm")
+- `subject_id` - Comma-separated subject IDs for multi-subject mode (optional)
+- `dose_label` - Comma-separated dose labels for grouping, e.g. `"10 mg,10 mg,30 mg"` (optional)
 
 **Population mode additional params**:
 - `n_subjects` - Number of subjects (triggers population mode)
+- `n_per_dose` - Number of subjects per dose level when multiple doses are given
 - `cv` - Coefficient of variation for BSV (default "0.30" = 30%)
 - `seed` - Random seed for reproducibility
 
@@ -420,6 +438,9 @@ Reads raw PK data files (CSV or Excel) from `/data` volume, standardizes to CDIS
   - `conc_col` - Column for concentration (default `"DV"`)
   - `dose_col` - Column for dose (default `"AMT"`); first non-zero per subject
   - `blq_col` - Column for BLQ flag (string, optional)
+  - `blq_before` - BLQ before first quantifiable: `"0"` (default) or `"drop"`
+  - `blq_after` - BLQ after last quantifiable: `"drop"` (default) or `"0"`
+  - `blq_middle` - BLQ between quantifiable samples: `"drop"` (default) or `"0"`
 - **Dose fallback**: `dose` - Fallback dose if `dose_col` absent or all-zero (default `"1"`)
 - **Output metadata**:
   - `conc_unit` - Concentration unit label for AVALU column (default `"ug/mL"`)
@@ -490,6 +511,8 @@ models into a single multi-drug ADPC CSV. All emit ADPC-compatible CSV(s) that f
   - `covariates` — overrides for models that require covariates, e.g. `"WT=70,CRCL=90"` (default `""`)
   - `route_override` — force iv_bolus/iv_infusion/extravascular (default `""`, auto-detected)
   - `times_override` — custom comma-separated sampling times in hours (default `""`)
+  - `residual` — `"true"` (default) adds within-subject residual error from the model's own error model (20% proportional CV if it defines none); `"false"` gives BSV-only output
+  - `dose_ref_file` — benchmark only: filename (in `output_dir`) of a CSV with `MODEL_REF,DOSE_MG` columns for per-model doses
   - `save_csv` — write the ADPC CSV (default `"true"`); `output_dir` (default `/data`), `figure_dir` (default `/figures`)
 - **List params**: `category_filter` — optional substring filter on model category.
 - **Benchmark params** (`mode="benchmark"`): generate **one combined multi-drug ADPC CSV** (with a
@@ -524,8 +547,12 @@ models into a single multi-drug ADPC CSV. All emit ADPC-compatible CSV(s) that f
 3. `assign_tier()` + `build_sampling_schedule()` derive a half-life-scaled sampling grid
    (early absolute points + log-spaced multiples out to ~5×t½).
 4. `simulate_library_population()` runs `rxSolve(nSub=N, omega=<published>, params=<ref covariates>)`,
-   reads the BSV-only concentration variable **`Cc`** (never the residual-bearing `sim`), and returns
-   a long data frame. **BSV-only** ground truth (no residual error added). Reproducible: `rxSetSeed()` + `cores=1`.
+   reads the BSV-only concentration variable **`Cc`** (IPRED, never rxode2's `sim` column), and returns
+   a long data frame. With `residual="true"` (the **default**) a within-subject residual error is then
+   applied on top of `Cc` from the model's own published error model (`extract_residual_error()`),
+   falling back to a 20% proportional CV (`DEFAULT_RESIDUAL_PROP_CV`) when the model defines none, and
+   BLQ flags are set. With `residual="false"` the output is BSV-only ground truth. Reproducible:
+   `rxSetSeed()` + `cores=1` with a deterministic base-R RNG for the residual draw.
 5. The endpoint writes the standard ADPC columns (`USUBJID, ATPTN, AVAL, AVALU, DOSE, DOSEU, DOSNO,
    ROUTE, BLQ`) so `/NCA` ingests the CSV directly.
 
@@ -638,6 +665,13 @@ curl -X POST http://localhost:5762/NCA -d 'data_file=nca_benchmark.csv'
 - Detailed logging at DEBUG level for troubleshooting
 - All endpoints automatically exposed as MCP tools via OpenAPI spec
 
+### Changelog
+- Maintain `CHANGELOG.md` (Keep a Changelog format, Semantic Versioning). Add an entry under `## [Unreleased]` in the same PR as any user-visible change.
+- Use only these headings: Added, Changed, Fixed, Removed, Deprecated, Security. Write one line per entry for users; do not paste commit messages.
+- Always flag explicitly: **tool changes** (renamed endpoint, changed parameter or default, which alter the MCP tool schema agents see); **numerical changes** (anything that could change results, stating which outputs may differ); **dependency changes** (base image, FastMCP, MCP spec version, R packages); and the new total when the **test count** changes.
+- Do not bump the version, create tags, or publish GitHub Releases. A maintainer cuts the release.
+- Internal-only changes (refactor, comments, CI) need no entry.
+
 ### Testing
 - **Python tests** (`tests/test_endpoints.py`): Integration tests via MCP client
 - **R tests** (`apis/tests/*.R`): Unit tests for model functions with ground truth validation
@@ -677,6 +711,8 @@ curl -X POST http://localhost:5762/NCA -d 'data_file=nca_benchmark.csv'
 │   ├── conftest.py        # Shared fixtures and helpers
 │   ├── test_endpoints.py  # MCP endpoint tests
 │   ├── test_library_endpoint.py # /LIBRARY integration tests
+│   ├── test_mcp_protocol.py # MCP 2026-07-28 protocol behavior tests
+│   ├── test_oauth.py      # OAuth issuer match; opt-in restart persistence (PMXAGENT_TEST_RESTART=1)
 │   ├── test_validation.py # Input validation tests
 │   └── fixtures/          # Test fixture files (auto-copied to data/ before test runs)
 │       └── example_pk_data.csv # Example 3-subject NONMEM-style PK data
@@ -690,12 +726,17 @@ curl -X POST http://localhost:5762/NCA -d 'data_file=nca_benchmark.csv'
 │   └── r-packages.txt     # R package install list
 ├── CLA.md                  # Contributor License Agreement
 ├── server.py              # FastMCP MCP server entry point
-├── docker-compose.yml     # Container orchestration
+├── docker-compose.yml     # Container orchestration (adds the mcp-state named volume)
+├── docker-compose.ghcr.yml # Override to run the prebuilt GHCR images (no local build)
+├── .env.example           # Template for MCP_TEST_TOKEN (copy to a gitignored .env for tests)
+├── CHANGELOG.md           # Keep a Changelog; see Changelog conventions above
+├── manuscript/            # Paper sources (Quarto); not used at runtime
 ├── .dockerignore          # Build context exclusions
 ├── pytest.ini             # Pytest configuration
 ├── requirements-dev.txt   # Test dependencies
 ├── .github/workflows/     # CI/CD
-│   └── test.yml          # GitHub Actions tests
+│   ├── test.yml          # GitHub Actions tests
+│   └── publish.yml       # Publishes container images to GHCR
 ├── CONTRIBUTING.md        # Contribution guidelines
 └── CITATION.cff          # Citation metadata
 ```

@@ -5,6 +5,9 @@ networks:
   pmxnet:
     driver: bridge
 
+volumes:
+  mcp-state:
+
 services:
   rapi:
     build:
@@ -60,6 +63,9 @@ services:
     platform: linux/amd64
     ports:
       - "8000:8000"
+    # Persisted OAuth client registrations (see MCP_CLIENTS_FILE in server.py).
+    volumes:
+      - mcp-state:/state
 
     # Resource limits (lighter than rapi)
     deploy:
@@ -77,7 +83,10 @@ services:
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: "INFO"
       MCP_BASE_URL: http://localhost:8000
-      MCP_TEST_TOKEN: "pmxagent-ci-token"
+      # Off by default. A static token that skips OAuth is for automated tests only:
+      # export MCP_TEST_TOKEN=<value> before `docker compose up` to enable it. Never
+      # commit a value here - anyone who can reach the port could authenticate with it.
+      MCP_TEST_TOKEN: "${MCP_TEST_TOKEN:-}"
       # Escape hatch. The server serves MCP 2026-07-28 only and refuses handshake-era
       # clients with JSON-RPC -32022. Set to "true" to re-admit them if a client
       # cannot yet negotiate the modern protocol - takes a restart, not a rebuild.

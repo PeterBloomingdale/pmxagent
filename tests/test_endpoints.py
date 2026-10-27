@@ -295,6 +295,8 @@ async def test_er_endpoint(mcp_client):
     })
 
     assert result["model_used"] in ["linear", "emax", "imax", "logit"]
+    assert result["aic_comparable"] is True
+    assert result["model_selection"] == "lowest AIC among converged models"
     assert "parameters" in result
     assert "AIC" in result["fit_stats"]
     assert "plot_path" in result
@@ -345,6 +347,9 @@ async def test_er_endpoint_binary_response(mcp_client):
     })
 
     assert result["model_used"] == "logit"
+    # Binary responses select logit by rule, so AICs across model families are not comparable.
+    assert result["aic_comparable"] is False
+    assert "AIC was not used" in result["model_selection"]
     assert "intercept" in result["parameters"]
     assert "slope" in result["parameters"]
     assert "EC50" in result["parameters"]

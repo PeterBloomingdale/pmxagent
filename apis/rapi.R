@@ -3,7 +3,7 @@
 
 #------------------------------------------------------------
 #* @apiTitle       R API
-#* @apiDescription Pharmacometric functions exposed via plumber
+#* @apiDescription Pharmacometric functions exposed via plumber. Example tools: not verified or validated. Users are responsible for their own verification and validation before relying on any result.
 #------------------------------------------------------------
 
 library(plumber)

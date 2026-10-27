@@ -67,7 +67,7 @@ USER pmxuser
 # a LABEL that consumes an ARG changes on every build, and anything below it
 # would rebuild each time - which for this image means recompiling rxode2 and
 # symengine. Defaults keep a bare `docker build` sensible.
-ARG VERSION=1.0.0
+ARG VERSION=1.1.0
 ARG VCS_REF=unknown
 ARG BUILD_DATE=
 LABEL org.opencontainers.image.version="${VERSION}"

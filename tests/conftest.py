@@ -14,9 +14,28 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 BASE_URL = "http://127.0.0.1:8000/mcp"
 
-# Static test token pre-authorized on the server via MCP_TEST_TOKEN env var.
-# Set MCP_TEST_TOKEN in the environment (and in docker-compose.yml) to enable
-# token-based auth for automated tests without browser OAuth.
+def _load_dotenv_token() -> None:
+    """Pick MCP_TEST_TOKEN up from the repo's .env, the file `docker compose` reads too.
+
+    One line in .env then configures both the server and the tests, with nothing to
+    export. A value already in the environment wins.
+    """
+    if os.getenv("MCP_TEST_TOKEN"):
+        return
+    env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    try:
+        with open(env_file, encoding="utf-8") as fh:
+            for line in fh:
+                key, sep, value = line.strip().partition("=")
+                if sep and key.strip() == "MCP_TEST_TOKEN":
+                    os.environ["MCP_TEST_TOKEN"] = value.strip().strip("\"'")
+    except OSError:
+        pass
+
+
+# Static test token pre-authorized on the server via the MCP_TEST_TOKEN env var, which
+# docker-compose.yml passes through (off when unset). Lets automated tests skip browser OAuth.
+_load_dotenv_token()
 _TEST_TOKEN = os.getenv("MCP_TEST_TOKEN", "")
 
 
