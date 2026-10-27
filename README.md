@@ -207,6 +207,7 @@ docker compose exec rapi Rscript /home/rstudio/apis/tests/test_library_models.R
 - **Port already in use?** Check with `lsof -i :8000` and `lsof -i :5762`, then free the port or change it in `docker-compose.yml`.
 - **Agent can't connect?** Confirm the MCP URL is `http://localhost:8000/mcp` (not `/messages`), and approve the OAuth prompt on first connection. Tokens refresh automatically on reconnect.
 - **OAuth sign-in fails, or "Client ID not found"?** The client's `iss` check compares against the issuer in `/.well-known/oauth-authorization-server`, which includes a trailing slash (`http://localhost:8000/`). Update to the latest image. Registered clients are stored in the `mcp-state` Docker volume and survive restarts; to reset them, run `docker compose down` and `docker volume rm pmxagent_mcp-state`, then reconnect the client.
+- **Plots or CSVs fail with a 500 ("could not open file" / "Permission denied")?** On Linux hosts the `rapi` container runs as uid 1001, so the bind-mounted `./figures` and `./data` folders must be writable by it. Run `chmod 777 figures data` (or `chown -R 1001 figures data`) and retry.
 - **Agent rejected with `-32022`?** Its MCP client is on the older handshake protocol; PMxAgent serves `2026-07-28` only. Either update the client, or set `MCP_ALLOW_LEGACY=true` in `docker-compose.yml` and `docker compose up -d mcp`.
 
 ---
